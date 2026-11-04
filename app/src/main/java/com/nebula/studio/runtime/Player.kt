@@ -3,10 +3,11 @@ package com.nebula.studio.runtime
 import android.content.Context
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.Text
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import nebula.core.Engine
 import nebula.lang.MetaFile
 import java.util.Properties
@@ -28,7 +29,7 @@ class Player(ctx: Context) {
             val metas = io.readText("scripts.meta")?.let { MetaFile.read(it) } ?: emptyMap()
             var host: JnaScriptHost? = null
             if (metas.isNotEmpty()) host = JnaScriptHost("scripts", PrefsSaveStore(ctx, config.getProperty("title", "game")))
-            val e = Engine({ io.readText(it) }, metas, host, { android.util.Log.i("Nebula", it) }, { it }, { sounds.play(it) })
+            val e = Engine({ io.readText(it) }, metas, host, { android.util.Log.i("Nebula", it) }, { it }, { sounds.play(it) }, { sounds.control(it) })
             e.screenW = gameW.toDouble(); e.screenH = gameH.toDouble()
             if (host != null) { host.engine = e; host.start()?.let { error = "script init: $it" } }
             if (error == null && !e.loadScene(config.getProperty("scene", "scenes/main.nscn"))) error = "cannot load the main scene"
@@ -40,6 +41,6 @@ class Player(ctx: Context) {
     fun Content() {
         val e = engine
         if (e != null && error == null) GameView(e, images, gameW, gameH, Modifier.fillMaxSize())
-        else Box(Modifier.fillMaxSize()) { Text(error ?: "Game failed to start", color = Color.White) }
+        else Box(Modifier.fillMaxSize()) { BasicText(error ?: "Game failed to start", style = TextStyle(color = Color.White)) }
     }
 }

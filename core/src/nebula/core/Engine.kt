@@ -36,10 +36,14 @@ class Engine(
     private val logSink: (String) -> Unit = { println(it) },
     private val mapError: (String) -> String = { it },
     private val soundSink: (String) -> Unit = { },
+    /** Play / stop requests of `Sound` nodes (volume, pitch, loop). */
+    private val soundCtl: (SoundCmd) -> Unit = { },
 ) {
     val tree = SceneTree()
     val input = Input()
     val saves = HashMap<String, String>()
+    /** Sprite sheet animations (`.nanim`). Clear it when the files change. */
+    val anims = AnimLibrary(readFile)
     var screenW = 1280.0
     var screenH = 720.0
     var time = 0.0
@@ -55,6 +59,8 @@ class Engine(
     private val sched = LinkedHashMap<Long, Sched>()
     private val touching = HashSet<Long>()
     private val pendingFree = LinkedHashSet<Long>()
+    private class AnimState(var set: String, var clip: String, var time: Double, var done: Boolean)
+    private val animStates = HashMap<Long, AnimState>()
     private var pendingScene: String? = null
 
     fun log(msg: String) = logSink(msg)
@@ -104,6 +110,8 @@ class Engine(
     /** Attach scripts, then ready() children before parents, then register scheduling. */
     private fun start(created: List<SceneNode>) {
         val h = host
+        animate(0.0)
+        for (n in created) if (n.type == "Sound" && n.b("autoplay")) playNode(n)
         for (n in created) {
             val path = n.script ?: continue
             val meta = metasByFile[path]
@@ -126,7 +134,8 @@ class Engine(
     fun shutdown() {
         for (n in tree.all().asReversed()) { host?.freed(n.id) }
         check()
-        sched.clear(); touching.clear(); pendingFree.clear(); pendingScene = null
+        for (n in tree.all()) if (n.type == "Sound") soundCtl(SoundCmd(n.id, n.s("file"), 0.0, 1.0, false, true))
+        sched.clear(); touching.clear(); pendingFree.clear(); animStates.clear(); pendingScene = null
         tree.root?.let { tree.remove(it) }
     }
 
@@ -158,6 +167,8 @@ class Engine(
                 if (s.frame && tree.alive(s.id)) { h.frame(s.id, dt); check() }
             }
         }
+        animate(dt)
+        serviceSounds()
         physics(dt)
         host?.pump(); check()
         flush()
@@ -172,11 +183,51 @@ class Engine(
     }
 
     private fun doFree(n: SceneNode) {
-        for (x in n.walkList().asReversed()) { host?.freed(x.id); sched.remove(x.id) }
+        for (x in n.walkList().asReversed()) {
+            host?.freed(x.id); sched.remove(x.id); animStates.remove(x.id)
+            if (x.type == "Sound") soundCtl(SoundCmd(x.id, x.s("file"), 0.0, 1.0, false, true))
+        }
         check()
         tree.remove(n)
     }
     private fun SceneNode.walkList(): List<SceneNode> { val l = ArrayList<SceneNode>(); walk { l.add(it) }; return l }
+
+    // ------------------------------------------------------------ animation and sound nodes
+    /** Advances every Sprite that has an animation set: writes its `frame`, fires `animationFinished` when a `once` clip ends. */
+    private fun animate(dt: Double) {
+        for (n in tree.all()) {
+            if (n.type != "Sprite") continue
+            val path = n.s("animations")
+            if (path.isEmpty()) { animStates.remove(n.id); continue }
+            val clip = anims.get(path)?.clip(n.s("animation")) ?: continue
+            val name = clip.name
+            val st = animStates.getOrPut(n.id) { AnimState(path, "", 0.0, false) }
+            if (st.set != path || st.clip != name) { st.set = path; st.clip = name; st.time = 0.0; st.done = false }
+            else if (st.done && n.b("playing")) { st.time = 0.0; st.done = false }     // animate("x") again after it finished
+            if (n.b("playing") && !st.done) st.time += dt * n.f("speed").coerceAtLeast(0.0)
+            val (frame, finished) = clip.frameAt(st.time)
+            n.props["frame"] = frame.toDouble()
+            if (finished && !st.done) {
+                st.done = true; n.props["playing"] = false
+                host?.fire(n.id, "animationFinished", 0.0, 0.0, 0); check()
+            }
+        }
+    }
+
+    /** Sound nodes are driven by the runtime flags `_play` / `_stop` that Sound.start() and Sound.stop() set. */
+    private fun serviceSounds() {
+        for (n in tree.all()) {
+            if (n.type != "Sound") continue
+            if (n.b("_stop")) { n.props["_stop"] = false; soundCtl(SoundCmd(n.id, n.s("file"), 0.0, 1.0, false, true)) }
+            if (n.b("_play")) { n.props["_play"] = false; playNode(n) }
+        }
+    }
+
+    private fun playNode(n: SceneNode) {
+        val file = n.s("file")
+        if (file.isEmpty()) return
+        soundCtl(SoundCmd(n.id, file, n.f("volume").coerceIn(0.0, 1.0), n.f("pitch").coerceIn(0.5, 2.0), n.b("loop"), false))
+    }
 
     // ------------------------------------------------------------ geometry, hit-testing, physics
     fun worldPos(n: SceneNode): Pair<Double, Double> {

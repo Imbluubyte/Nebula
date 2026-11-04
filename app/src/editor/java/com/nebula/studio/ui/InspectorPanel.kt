@@ -72,7 +72,7 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
         }
         Kind.F -> Row(verticalAlignment = Alignment.CenterVertically) {
             Field(fmtNum(n.f(d.name)), { v -> v.toDoubleOrNull()?.let { x -> studio.change { it.setProp(n, d.name, x) } } }, Modifier.weight(1f), label = d.name, number = true)
-            val step = if (d.name == "rotation") 15.0 else if (d.name == "scale" || d.name == "zoom") 0.1 else 8.0
+            val step = if (d.name == "rotation") 15.0 else if (d.name in listOf("scale", "zoom", "volume", "pitch", "speed")) 0.1 else if (d.name in listOf("frame", "hframes", "vframes")) 1.0 else 8.0
             IconBtn(Icons.Default.Remove, "less", { studio.change { it.setProp(n, d.name, n.f(d.name) - step) } })
             IconBtn(Icons.Default.Add, "more", { studio.change { it.setProp(n, d.name, n.f(d.name) + step) } })
         }
@@ -90,6 +90,21 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
                     TextBtn(n.s(d.name).ifEmpty { "choose file..." }, {
                         val files = (studio.project?.assets() ?: emptyList()).filter { f -> exts.any { f.lowercase().endsWith(it) } }
                         studio.modal = Modal.Pick("Choose ${d.hint}", listOf("(none)") + files) { picked -> studio.change { it.setProp(n, d.name, if (picked == "(none)") "" else picked) } }
+                    }, Modifier.fillMaxWidth())
+                }
+                "animations" -> {
+                    Text("${d.name} (sprite sheet animations)", color = C.dim, fontSize = 11.sp)
+                    TextBtn(n.s(d.name).ifEmpty { "choose animation set..." }, {
+                        val files = studio.project?.animations() ?: emptyList()
+                        studio.modal = Modal.Pick("Choose animation set", listOf("(none)") + files) { picked -> studio.change { it.setProp(n, d.name, if (picked == "(none)") "" else picked) } }
+                    }, Modifier.fillMaxWidth())
+                    if (n.s(d.name).isNotEmpty()) TextBtn("Open animation manager", { studio.openAnimation(n.s(d.name)) }, Modifier.fillMaxWidth().padding(top = 6.dp))
+                }
+                "animation" -> {
+                    Text("${d.name} (clip played at start)", color = C.dim, fontSize = 11.sp)
+                    val clips = studio.images?.anims?.get(n.s("animations"))?.clips?.map { it.name } ?: emptyList()
+                    TextBtn(n.s(d.name).ifEmpty { "choose clip..." }, {
+                        studio.modal = Modal.Pick("Choose clip", listOf("(none)") + clips) { picked -> studio.change { it.setProp(n, d.name, if (picked == "(none)") "" else picked) } }
                     }, Modifier.fillMaxWidth())
                 }
                 "color" -> {

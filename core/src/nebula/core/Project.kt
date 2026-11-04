@@ -34,10 +34,40 @@ class Project(val dir: File) {
     fun scenes() = list("scenes", ".nscn")
     fun scripts() = list("scripts", ".nbs")
     fun assets() = list("assets", "").filter { !it.endsWith("/") }
+    fun animations() = list("animations", ".nanim")
+
+    /** Folders under [sub] (relative paths, empty ones included), sorted. */
+    fun folders(sub: String): List<String> {
+        val base = File(dir, sub)
+        return base.walkTopDown().filter { it.isDirectory && it != base }
+            .map { it.relativeTo(dir).path.replace('\\', '/') }.sorted().toList()
+    }
+
+    /** True for the managed roots (scenes, scripts, assets, animations) and anything inside them. */
+    fun isManaged(rel: String): Boolean {
+        val parts = rel.split('/')
+        if (parts.any { it.isEmpty() || it == "." || it == ".." }) return false
+        return parts[0] in ROOTS
+    }
+
+    /** Creates a folder inside a managed root or one of its folders. Returns the new relative path. */
+    fun createFolder(parent: String, name: String): String {
+        val clean = name.trim().replace(Regex("[^A-Za-z0-9_-]"), "_")
+        require(clean.isNotEmpty()) { "the folder name is empty" }
+        val p = parent.trim('/')
+        require(isManaged(p)) { "folders live inside ${ROOTS.joinToString(", ")}" }
+        val rel = "$p/$clean"
+        val f = file(rel)
+        require(!f.exists()) { "'$rel' already exists" }
+        require(f.mkdirs()) { "cannot create '$rel'" }
+        return rel
+    }
 
     fun scriptSources(): List<ScriptSource> = scripts().map { ScriptSource(it, file(it).readText()) }
 
     companion object {
+        val ROOTS = listOf("scenes", "scripts", "assets", "animations")
+
         fun create(dir: File, title: String, packageId: String = "com.nebula.game"): Project {
             dir.mkdirs()
             val p = Project(dir); p.title = title; p.packageId = packageId; p.save()

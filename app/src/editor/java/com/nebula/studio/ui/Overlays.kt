@@ -31,11 +31,15 @@ import nebula.core.NodeTypes
 fun ModalHost(studio: Studio) {
     val m = studio.modal ?: return
     Box(Modifier.fillMaxSize().background(Color(0xAA000000)).clickable { studio.modal = null }, contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.padding(top = 56.dp, start = 16.dp, end = 16.dp).widthIn(max = 560.dp).fillMaxWidth().heightIn(max = 640.dp)
+        val wide = m is Modal.Animation
+        Column(Modifier.padding(top = if (wide) 24.dp else 56.dp, start = 16.dp, end = 16.dp).widthIn(max = if (wide) 860.dp else 560.dp).fillMaxWidth().heightIn(max = if (wide) 720.dp else 640.dp)
             .clip(RoundedCornerShape(16.dp)).background(C.panel).clickable(enabled = false) {}.padding(16.dp)) {
             when (m) {
                 Modal.NewProject -> NewProjectDialog(studio)
                 Modal.NewNode -> NewNodeDialog(studio)
+                Modal.NewAnimation -> TextPrompt(studio, "New animation set", "Name", "hero", "Create") { studio.newAnimation(it) }
+                Modal.Animation -> AnimationManager(studio)
+                is Modal.NewFolder -> TextPrompt(studio, "New folder in ${m.parent}/", "Folder name", "", "Create") { studio.newFolder(m.parent, it) }
                 Modal.NewScene -> TextPrompt(studio, "New scene", "Scene name", "level2", "Create") { studio.newScene(it) }
                 Modal.Palette -> PaletteDialog(studio)
                 Modal.Export -> ExportDialog(studio)
@@ -134,6 +138,7 @@ private fun ExportDialog(studio: Studio) {
     var pkg by remember { mutableStateOf(p.packageId) }
     var label by remember { mutableStateOf(p.title) }
     var install by remember { mutableStateOf(true) }
+    var downloads by remember { mutableStateOf(studio.setting("export_downloads") == "true") }
     Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Export APK", color = C.text, fontSize = 18.sp)
         Field(p.title, { label = it }, label = "App name")
@@ -142,11 +147,15 @@ private fun ExportDialog(studio: Studio) {
             Text("Install after export", color = C.text, modifier = Modifier.weight(1f))
             Switch(install, { install = it }, colors = SwitchDefaults.colors(checkedTrackColor = C.accent))
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Also save a copy to the Downloads folder", color = C.text, modifier = Modifier.weight(1f))
+            Switch(downloads, { downloads = it; studio.setSetting("export_downloads", it.toString()) }, colors = SwitchDefaults.colors(checkedTrackColor = C.accent))
+        }
         Text("Builds your scripts, packs the project into a copy of the Nebula player and signs it" +
             (if (studio.setting("keystore").isBlank()) " with Nebula's built-in debug key (fine for sideloading; set your own keystore in Settings for releases)." else " with your keystore."),
             color = C.dim, fontSize = 12.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextBtn("Export", { studio.modal = null; studio.export(pkg.trim(), label.trim().ifEmpty { p.title }, install) }, primary = true); TextBtn("Cancel", { studio.modal = null })
+            TextBtn("Export", { studio.modal = null; studio.export(pkg.trim(), label.trim().ifEmpty { p.title }, install, downloads) }, primary = true); TextBtn("Cancel", { studio.modal = null })
         }
     }
 }

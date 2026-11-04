@@ -7,7 +7,9 @@ import android.media.AudioAttributes
 import android.media.SoundPool
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import nebula.core.AnimLibrary
 import nebula.core.Project
+import nebula.core.SoundCmd
 import java.io.File
 
 /** Where a running project's files come from: a folder (studio) or the APK's assets (exported game). */
@@ -36,30 +38,53 @@ class ImageCache(private val io: ProjectIO) {
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
         }
     }
-    fun clear() = map.clear()
+    /** Sprite sheet animation sets (`.nanim`), read through the same project files. */
+    val anims = AnimLibrary { io.readText(it) }
+    fun clear() { map.clear(); anims.clear() }
 }
 
-/** Plays short sounds from project files. */
+/** Plays short sounds from project files. `Sound` nodes pass their volume, pitch and loop through [control]. */
 class Sounds(private val ctx: Context, private val io: ProjectIO) {
     private val pool = SoundPool.Builder().setMaxStreams(8)
         .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_GAME).build()).build()
     private val ids = HashMap<String, Int>()
     private val ready = HashSet<Int>()
-    private val queued = HashSet<Int>()
+    private class Req(val key: Long, val volume: Float, val rate: Float, val loop: Boolean)
+    private val queued = HashMap<Int, MutableList<Req>>()    // sound id -> plays waiting for the file to finish loading
+    private val streams = HashMap<Long, Int>()               // node id -> its latest stream (so it can be stopped)
 
     init {
-        pool.setOnLoadCompleteListener { p, id, status -> if (status == 0) { ready.add(id); if (queued.remove(id)) p.play(id, 1f, 1f, 1, 0, 1f) } }
+        pool.setOnLoadCompleteListener { _, id, status ->
+            if (status == 0) { ready.add(id); queued.remove(id)?.forEach { start(id, it) } } else queued.remove(id)
+        }
     }
 
-    fun play(path: String) {
+    private fun load(path: String): Int? {
+        ids[path]?.let { return it }
+        val bytes = io.readBytes(path) ?: return null
+        val f = File(ctx.cacheDir, "snd_" + path.replace('/', '_'))
+        f.writeBytes(bytes)
+        val id = pool.load(f.absolutePath, 1)
+        ids[path] = id
+        return id
+    }
+
+    private fun start(id: Int, r: Req) {
+        val stream = pool.play(id, r.volume, r.volume, 1, if (r.loop) -1 else 0, r.rate)
+        if (stream != 0 && r.key != 0L) streams[r.key] = stream
+    }
+
+    fun play(path: String, volume: Float = 1f, rate: Float = 1f, loop: Boolean = false, key: Long = 0L) {
         if (path.isEmpty()) return
-        val id = ids.getOrPut(path) {
-            val bytes = io.readBytes(path) ?: return
-            val f = File(ctx.cacheDir, "snd_" + path.replace('/', '_'))
-            f.writeBytes(bytes)
-            pool.load(f.absolutePath, 1)
-        }
-        if (id in ready) pool.play(id, 1f, 1f, 1, 0, 1f) else queued.add(id)
+        val id = load(path) ?: return
+        val r = Req(key, volume, rate, loop)
+        if (id in ready) start(id, r) else queued.getOrPut(id) { ArrayList() }.add(r)
+    }
+
+    fun control(c: SoundCmd) {
+        if (c.stop) { streams.remove(c.key)?.let { pool.stop(it) }; return }
+        if (c.loop) streams.remove(c.key)?.let { pool.stop(it) }     // a looping node restarts instead of stacking
+        play(c.file, c.volume.toFloat(), c.pitch.toFloat(), c.loop, c.key)
     }
 
     fun release() = pool.release()

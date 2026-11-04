@@ -27,7 +27,10 @@ object NodeTypes {
         NodeType("Node2D", "Node", listOf(
             f("x", 0.0), f("y", 0.0), f("rotation", 0.0), f("scale", 1.0), f("layer", 0.0),
             b("visible", true), b("touchable", false)), listOf(BcDef("tapped", 2)), "+"),
-        NodeType("Sprite", "Node2D", listOf(s("image", "", "image"), b("flipX", false), f("width", 0.0), f("height", 0.0)), icon = "S"),
+        NodeType("Sprite", "Node2D", listOf(s("image", "", "image"), b("flipX", false), f("width", 0.0), f("height", 0.0),
+            f("hframes", 1.0), f("vframes", 1.0), f("frame", 1.0),
+            s("animations", "", "animations"), s("animation", "", "animation"), b("playing", true), f("speed", 1.0)),
+            listOf(BcDef("animationFinished", 0)), "S"),
         NodeType("Shape", "Node2D", listOf(s("shape", "rect", "shape"), f("width", 64.0), f("height", 64.0), s("color", "#4FC3F7", "color")), icon = "R"),
         NodeType("Label", "Node2D", listOf(s("text", "Label"), f("fontSize", 24.0), s("color", "#FFFFFF", "color")), icon = "T"),
         NodeType("Button", "Node2D", listOf(s("text", "Button"), f("width", 160.0), f("height", 64.0),
@@ -37,7 +40,7 @@ object NodeTypes {
             b("solid", false), b("static", false), f("bounce", 0.0), b("onGround", false), s("color", "", "color")),
             listOf(BcDef("collided", 1)), "P"),
         NodeType("Camera", "Node2D", listOf(f("zoom", 1.0)), icon = "C"),
-        NodeType("Sound", "Node", listOf(s("file", "", "sound")), icon = "A"),
+        NodeType("Sound", "Node", listOf(s("file", "", "sound"), f("volume", 1.0), f("pitch", 1.0), b("loop", false), b("autoplay", false)), icon = "A"),
     )
 
     private val byName = all.associateBy { it.name }

@@ -236,9 +236,15 @@ class Node2D extends Node:
 		nb_set_b(id, "touchable", value)
 
 class Sprite extends Node2D:
+	var animationFinished = Bc0()
 	fn onCreation(id: Int):
 		super.onCreation(id)
 		sprites[id] = self
+	fn nbFire(name: String, a: Float, b: Float, other: Int):
+		if name == "animationFinished":
+			animationFinished.send()
+		else:
+			super.nbFire(name, a, b, other)
 	fn image() -> String:
 		return nb_get_s(id, "image")
 	fn setImage(file: String):
@@ -247,6 +253,24 @@ class Sprite extends Node2D:
 		return nb_get_b(id, "flipX")
 	fn setFlipX(value: Bool):
 		nb_set_b(id, "flipX", value)
+	# sprite sheets: frames are numbered from 1 (left to right, top to bottom); clips come from the sprite's animation set
+	fn animate(clip: String):
+		nb_set_s(id, "animation", clip)
+		nb_set_b(id, "playing", true)
+	fn stopAnimating():
+		nb_set_b(id, "playing", false)
+	fn animation() -> String:
+		return nb_get_s(id, "animation")
+	fn isAnimating() -> Bool:
+		return nb_get_b(id, "playing")
+	fn setAnimSpeed(value: Float):
+		nb_set_f(id, "speed", value)
+	fn setAnimations(file: String):
+		nb_set_s(id, "animations", file)
+	fn frame() -> Float:
+		return nb_get_f(id, "frame")
+	fn setFrame(number: Float):
+		nb_set_f(id, "frame", number)
 
 class Shape extends Node2D:
 	fn onCreation(id: Int):
@@ -322,7 +346,17 @@ class Sound extends Node:
 		super.onCreation(id)
 		sounds[id] = self
 	fn start():
-		nb_sound(nb_get_s(id, "file"))
+		nb_set_b(id, "_play", true)
+	fn stop():
+		nb_set_b(id, "_stop", true)
+	fn setFile(file: String):
+		nb_set_s(id, "file", file)
+	fn setVolume(value: Float):
+		nb_set_f(id, "volume", value)
+	fn setPitch(value: Float):
+		nb_set_f(id, "pitch", value)
+	fn setLoop(value: Bool):
+		nb_set_b(id, "loop", value)
 
 # ---- looking nodes up -----------------------------------------------------------------
 fn wrap(id: Int) -> Node:

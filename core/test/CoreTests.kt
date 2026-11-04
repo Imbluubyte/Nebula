@@ -68,6 +68,24 @@ fun main(args: Array<String>) {
     check("errors remap to .nbs", !bad.ok && bad.messages.any { "scripts/hero.nbs:" in it }, bad.messages.joinToString("\n     "))
     File(proj.dir, "scripts/hero.nbs").writeText(Templates.starter("x")["scripts/hero.nbs"]!!)
 
+    // the new Sprite animation and Sound API must compile through snc
+    val apiProj = Project.create(File(tmp, "apitest"), "Api Test")
+    File(apiProj.dir, "scripts/probe.nbs").writeText("script Probe of Sprite:\n\tfn onReady():\n\t\thear animationFinished -> onDone\n\t\tanimate(\"run\")\n\t\tsetAnimations(\"animations/hero.nanim\")\n\t\tsetAnimSpeed(0.5)\n\t\tsetFrame(2.0)\n\t\tlog(frame())\n\t\tlog(isAnimating())\n\t\tlog(animation())\n\t\tstopAnimating()\n\tfn onDone():\n\t\tlog(\"done\")\n")
+    File(apiProj.dir, "scripts/jingle.nbs").writeText("script Jingle of Sound:\n\tfn onReady():\n\t\tsetFile(\"assets/a.wav\")\n\t\tsetVolume(0.5)\n\t\tsetPitch(1.5)\n\t\tsetLoop(true)\n\t\tstart()\n\t\tstop()\n")
+    val apiRes = Builder(apiProj, ProcessRunner(), apiDir.absoluteFile, snc).build()
+    check("sprite animation + Sound API compile with snc", apiRes.ok, apiRes.messages.joinToString("\n     "))
+
+    // --- folders in the project
+    val sfx = proj.createFolder("assets", "sfx!")
+    check("folder created and sanitised", sfx == "assets/sfx_" && proj.file(sfx).isDirectory)
+    check("nested folder listed (empty ones too)", proj.createFolder(sfx, "hits") == "assets/sfx_/hits" && proj.folders("assets") == listOf("assets/sfx_", "assets/sfx_/hits"), proj.folders("assets").toString())
+    check("duplicate folder refused", runCatching { proj.createFolder("assets", "sfx!") }.isFailure)
+    check("folders only inside managed roots", runCatching { proj.createFolder("build", "x") }.isFailure && runCatching { proj.createFolder("assets/../scripts", "x") }.isFailure)
+    check("empty name refused", runCatching { proj.createFolder("scenes", "  ") }.isFailure)
+    File(proj.dir, "scripts/ai").mkdirs(); File(proj.dir, "scripts/ai/enemy.nbs").writeText("script Enemy of Node2D:\n\tpass\n")
+    check("scripts in folders are found", proj.scripts().contains("scripts/ai/enemy.nbs"))
+    File(proj.dir, "scripts/ai").deleteRecursively()
+
     // --- engine with a fake host
     val metas = MetaFile.read(File(proj.buildDir, "scripts.meta").readText())
     val host = FakeHost()
@@ -106,6 +124,38 @@ fun main(args: Array<String>) {
     eng2.loadScene("scenes/t.nscn"); repeat(120) { eng2.update(1.0 / 60) }
     check("onTick(30) = 60 calls / 2s", h2.calls.count { it.endsWith(" 30") && it.startsWith("tick") } == 60, h2.calls.count { it.startsWith("tick") }.toString())
     check("onTick(60) = 120 calls / 2s", h2.calls.count { it.endsWith(" 60") && it.startsWith("tick") } in 119..120)
+
+    // --- sprite sheet animation and Sound nodes
+    check("anim set roundtrip", AnimSet.parse("sheet assets/s.png\ngrid 4 2\nanim run 1 4 10 loop\nanim hit 5 7 10 once\n").let { AnimSet.parse(it.toText()).toText() == it.toText() && it.clips.size == 2 && it.sheet == "assets/s.png" && it.frameCount == 8 })
+    check("anim set ignores junk", AnimSet.parse("nonsense\nanim x a b c\ngrid 0 -3\n").let { it.clips.isEmpty() && it.cols == 1 && it.rows == 1 })
+    check("clip backwards", Clip("b", 4, 1, 10.0, true).let { it.frameAt(0.0).first == 4 && it.frameAt(0.35).first == 1 && it.frameAt(0.4).first == 4 })
+    val files = HashMap<String, String>()
+    files["a.nanim"] = "sheet assets/s.png\ngrid 4 2\nanim run 1 4 10 loop\nanim hit 5 7 10 once\n"
+    files["s.nscn"] = "scene \"s\"\nnode R Node2D\n\tnode P Sprite\n\t\tanimations = \"a.nanim\"\n\t\tanimation = \"run\"\n\tnode S Sound\n\t\tfile = \"assets/b.wav\"\n\t\tvolume = 0.5\n\t\tloop = true\n\t\tautoplay = true\n"
+    val soundCmds = ArrayList<SoundCmd>(); val h3 = FakeHost()
+    val eng3 = Engine({ files[it] }, emptyMap(), h3, { }, { it }, { }, { soundCmds.add(it) })
+    check("animation scene loads", eng3.loadScene("s.nscn"))
+    val sp = eng3.tree.find(eng3.tree.root!!, "P")!!
+    check("clip starts on its first frame", sp.f("frame") == 1.0, sp.f("frame").toString())
+    eng3.update(0.25); check("animation advances", sp.f("frame") == 3.0, sp.f("frame").toString())
+    eng3.update(0.5); check("looping clip wraps", sp.f("frame") == 4.0, sp.f("frame").toString())
+    sp.props["animation"] = "hit"; sp.props["playing"] = true; eng3.update(0.0)
+    check("switching clips restarts", sp.f("frame") == 5.0, sp.f("frame").toString())
+    eng3.update(0.35)
+    check("once clip stops on its last frame", sp.f("frame") == 7.0 && !sp.b("playing"), sp.f("frame").toString())
+    check("animationFinished fired once", h3.calls.count { it == "fire ${sp.id} animationFinished 0" } == 1, h3.calls.toString())
+    eng3.update(0.1); check("finished clip stays put", sp.f("frame") == 7.0 && h3.calls.count { it.contains("animationFinished") } == 1)
+    sp.props["playing"] = true; eng3.update(0.0)
+    check("animate() again replays a finished clip", sp.f("frame") == 5.0 && sp.b("playing"), sp.f("frame").toString())
+    check("autoplay Sound starts looping at its volume", soundCmds.any { !it.stop && it.file == "assets/b.wav" && it.volume == 0.5 && it.loop }, soundCmds.size.toString())
+    soundCmds.clear()
+    val snd = eng3.tree.find(eng3.tree.root!!, "S")!!
+    snd.props["_play"] = true; eng3.update(0.016)
+    check("Sound.start() plays", soundCmds.size == 1 && !soundCmds[0].stop && soundCmds[0].key == snd.id, soundCmds.size.toString())
+    snd.props["_stop"] = true; eng3.update(0.016)
+    check("Sound.stop() stops", soundCmds.last().stop && !snd.b("_stop"))
+    soundCmds.clear(); eng3.shutdown()
+    check("shutdown stops sounds", soundCmds.any { it.stop })
 
     // --- scene editor
     val ed = SceneEditor { proj.readText(it) }

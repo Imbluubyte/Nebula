@@ -1,16 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
-
-    <queries>
-        <package android:name="com.termux" />
-    </queries>
-
-    <!-- The label is a plain literal ("Nebula") so the exporter can swap it in the binary manifest. -->
+    <!-- Shared by the editor and the player. The label is a plain literal ("Nebula") so the exporter can swap it in the binary manifest. -->
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"

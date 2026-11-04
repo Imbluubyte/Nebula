@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.nebula.studio.build.ApkExporter
+import com.nebula.studio.build.Downloads
 import com.nebula.studio.build.ExportOptions
 import com.nebula.studio.build.Installer
 import com.nebula.studio.build.TermuxRunner
@@ -53,6 +54,38 @@ class ScriptDoc(val path: String, initial: String) {
     }
 }
 
+/** A `.nanim` file open in the animation manager. Every edit replaces [set] (so the UI updates) and is saved straight away. */
+class AnimDoc(val path: String, initial: AnimSet, private val onChange: (AnimDoc) -> Unit) {
+    var set by mutableStateOf(initial)
+    var selected by mutableIntStateOf(0)
+
+    fun edit(sheet: String = set.sheet, cols: Int = set.cols, rows: Int = set.rows, clips: List<Clip> = set.clips) {
+        set = AnimSet(sheet, cols.coerceIn(1, 512), rows.coerceIn(1, 512), ArrayList(clips)); onChange(this)
+    }
+
+    fun updateClip(i: Int, name: String? = null, from: Int? = null, to: Int? = null, fps: Double? = null, loop: Boolean? = null) {
+        val c = set.clips.getOrNull(i) ?: return
+        var nn = name?.let { AnimSet.cleanName(it) }?.takeIf { it.isNotEmpty() } ?: c.name
+        if (set.clips.withIndex().any { (k, o) -> k != i && o.name == nn }) nn = c.name       // names must be unique
+        val top = set.cols * set.rows
+        val list = ArrayList(set.clips)
+        list[i] = Clip(nn, (from ?: c.from).coerceIn(1, top), (to ?: c.to).coerceIn(1, top), (fps ?: c.fps).coerceIn(0.0, 240.0), loop ?: c.loop)
+        edit(clips = list)
+    }
+
+    fun addClip() {
+        var n = "clip"; var k = 2
+        while (set.clips.any { it.name == n }) n = "clip" + k++
+        val list = ArrayList(set.clips); list.add(Clip(n, 1, 1, 8.0, true))
+        selected = list.lastIndex; edit(clips = list)
+    }
+
+    fun removeClip(i: Int) {
+        val list = ArrayList(set.clips); if (i !in list.indices) return
+        list.removeAt(i); selected = selected.coerceAtMost(list.lastIndex).coerceAtLeast(0); edit(clips = list)
+    }
+}
+
 class GameSession(val engine: Engine, val images: ImageCache, val sounds: Sounds, val w: Int, val h: Int)
 
 sealed class Modal {
@@ -64,6 +97,9 @@ sealed class Modal {
     object Settings : Modal()
     object Help : Modal()
     class Rename(val path: String) : Modal()
+    class NewFolder(val parent: String) : Modal()
+    object NewAnimation : Modal()
+    object Animation : Modal()
     class Confirm(val message: String, val action: () -> Unit) : Modal()
     class Pick(val title: String, val options: List<String>, val onPick: (String) -> Unit) : Modal()
 }
@@ -91,12 +127,65 @@ class Studio(val ctx: Context) {
     var consoleOpen by mutableStateOf(true)
     var modal by mutableStateOf<Modal?>(null)
     var showGrid by mutableStateOf(true)
+    var showFps by mutableStateOf(false)               // FPS counter over the game while testing in the editor
     var snap by mutableIntStateOf(8)
     val console = mutableStateListOf<LogLine>()
     var building by mutableStateOf(false)
     var status by mutableStateOf("")
     var game by mutableStateOf<GameSession?>(null)
     var images by mutableStateOf<ImageCache?>(null)
+
+    // ---- files panel
+    var filesFolder by mutableStateOf<String?>(null)    // folder chosen in the Files panel: where imports and new files go
+    val collapsedFolders = mutableStateListOf<String>()
+
+    // ---- assets and the animation manager
+    var animDoc by mutableStateOf<AnimDoc?>(null)
+    private var preview: Sounds? = null
+
+    fun previewSound(path: String) {
+        val p = project ?: return
+        val s = preview ?: Sounds(ctx, DiskIO(p)).also { preview = it }
+        s.play(path); info("Playing $path")
+    }
+
+    /** Tapping an asset in the Files panel: sounds play, animation files open in the manager. */
+    fun openAsset(path: String) {
+        val l = path.lowercase()
+        if (l.endsWith(".wav") || l.endsWith(".ogg") || l.endsWith(".mp3")) previewSound(path)
+    }
+
+    fun openAnimation(path: String) {
+        val p = project ?: return
+        animDoc = AnimDoc(path, AnimSet.parse(p.readText(path) ?: "")) { saveAnim(it) }
+        modal = Modal.Animation
+    }
+
+    private fun saveAnim(d: AnimDoc) {
+        val p = project ?: return
+        try { p.file(d.path).writeText(d.set.toText()); images?.anims?.clear(); rev++ }
+        catch (e: Exception) { error("Cannot save ${d.path}: ${e.message}") }
+    }
+
+    fun closeAnimation() { modal = null; animDoc = null }
+
+    fun newAnimation(name: String) {
+        val p = project ?: return
+        val clean = AnimSet.cleanName(name).ifEmpty { return }
+        val path = "${under("animations")}/$clean.nanim"
+        if (p.file(path).exists()) { error("animation set '$clean' already exists"); return }
+        p.file(path).parentFile?.mkdirs(); p.file(path).writeText(AnimSet().toText())
+        rev++; openAnimation(path)
+    }
+
+    /** Lets the user pick the sprite sheet image for the open animation set, then returns to the manager. */
+    fun pickSheet() {
+        val p = project ?: return; val d = animDoc ?: return
+        val imgs = p.assets().filter { f -> listOf(".png", ".jpg", ".jpeg", ".webp").any { f.lowercase().endsWith(it) } }
+        modal = Modal.Pick("Sprite sheet image", imgs) { d.edit(sheet = it); modal = Modal.Animation }
+    }
+
+    private fun under(root: String): String = filesFolder?.takeIf { it == root || it.startsWith("$root/") } ?: root
 
     var importHook: (() -> Unit)? = null
     fun importAsset() { importHook?.invoke() }
@@ -107,9 +196,9 @@ class Studio(val ctx: Context) {
         try {
             var name = "asset"
             ctx.contentResolver.query(uri, null, null, null, null)?.use { c -> if (c.moveToFirst()) { val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME); if (i >= 0) name = c.getString(i) } }
-            val dest = File(p.dir, "assets/" + name.replace(Regex("[^A-Za-z0-9._-]"), "_")); dest.parentFile?.mkdirs()
+            val dest = File(p.dir, under("assets") + "/" + name.replace(Regex("[^A-Za-z0-9._-]"), "_")); dest.parentFile?.mkdirs()
             ctx.contentResolver.openInputStream(uri)?.use { input -> dest.outputStream().use { input.copyTo(it) } }
-            images?.clear(); rev++; info("Imported assets/${dest.name}")
+            images?.clear(); rev++; info("Imported ${dest.relativeTo(p.dir).path}")
         } catch (e: Exception) { error("Import failed: ${e.message}") }
     }
 
@@ -121,6 +210,7 @@ class Studio(val ctx: Context) {
         if (settingsFile.exists()) settingsFile.inputStream().use { settings.load(it) }
         snap = settings.getProperty("snap", "8").toIntOrNull() ?: 8
         showGrid = settings.getProperty("grid", "true") == "true"
+        showFps = settings.getProperty("fps", "false") == "true"
         installApi()
     }
 
@@ -140,6 +230,8 @@ class Studio(val ctx: Context) {
     }
 
     fun listProjects(): List<File> = root.listFiles { f -> f.isDirectory && File(f, "project.nebula").exists() }?.sortedBy { it.name.lowercase() } ?: emptyList()
+
+    fun toggleFps() { showFps = !showFps; setSetting("fps", showFps.toString()) }
 
     fun setSetting(key: String, value: String) { settings.setProperty(key, value); settingsFile.outputStream().use { settings.store(it, "Nebula settings") } }
     fun setting(key: String, def: String = "") = settings.getProperty(key, def) ?: def
@@ -173,6 +265,7 @@ class Studio(val ctx: Context) {
 
     fun closeProject() {
         stop(); saveAll()
+        preview?.release(); preview = null; animDoc = null
         project = null; editor = null; scenePath = null; scripts.clear(); activeScript = null; selectedPath = null; lowered = null
         centerTab = CenterTab.Scene
     }
@@ -191,7 +284,7 @@ class Studio(val ctx: Context) {
     fun newScene(name: String) {
         val p = project ?: return
         val clean = name.trim().replace(Regex("[^A-Za-z0-9_]"), "_").ifEmpty { return }
-        val path = "scenes/$clean.nscn"
+        val path = "${under("scenes")}/$clean.nscn"
         if (p.file(path).exists()) { error("scene '$clean' already exists"); return }
         saveScene()
         val ed = SceneEditor { p.readText(it) }; ed.newScene(path, clean)
@@ -275,13 +368,38 @@ class Studio(val ctx: Context) {
         images?.clear(); lint()
     }
 
+    fun newFolder(parent: String, name: String) {
+        val p = project ?: return
+        try {
+            val rel = p.createFolder(parent, name)
+            collapsedFolders.remove(parent); filesFolder = rel; rev++; info("Created $rel/")
+        } catch (e: IllegalArgumentException) { error("Folder not created: ${e.message}") }
+    }
+
+    /** Deletes a folder and everything in it (scripts are detached from their nodes). The roots themselves stay. */
+    fun deleteFolder(rel: String) {
+        val p = project ?: return
+        if (!p.isManaged(rel) || rel in Project.ROOTS) return
+        val prefix = "$rel/"
+        if (p.mainScene.startsWith(prefix)) { error("The main scene is inside $rel. Pick another main scene in Settings first."); return }
+        val inside = p.file(rel).walkTopDown().filter { it.isFile }.map { it.relativeTo(p.dir).path.replace('\\', '/') }.toList()
+        val sceneInside = scenePath?.startsWith(prefix) == true
+        for (f in inside) deleteFile(f)
+        p.file(rel).deleteRecursively()
+        if (sceneInside) editor?.markSaved()      // after the loop: detaching scripts dirties the open scene, which must not be written back
+        collapsedFolders.removeAll { it == rel || it.startsWith(prefix) }
+        if (filesFolder == rel || filesFolder?.startsWith(prefix) == true) filesFolder = null
+        if (sceneInside) openScene(p.mainScene)
+        rev++; info("Deleted $rel/")
+    }
+
     /** New script file for the selected node: `script Name of <node type>:` with the usual hooks. */
     fun newScriptForSelected() {
         val p = project ?: return; val n = selected() ?: run { info("Select a node first."); return }
         val cls = n.name.replace(Regex("[^A-Za-z0-9_]"), "").replaceFirstChar { it.uppercase() }.ifEmpty { "Script" }
         var name = cls; var i = 2
-        while (p.file("scripts/${fileName(name)}").exists() || p.scripts().any { it.endsWith("/" + fileName(name)) }) name = cls + i++
-        val path = "scripts/${fileName(name)}"
+        while (p.scripts().any { it.endsWith("/" + fileName(name)) }) name = cls + i++
+        val path = "${under("scripts")}/${fileName(name)}"
         val base = if (n.type == "Node") "Node" else n.type
         p.file(path).parentFile?.mkdirs()
         p.file(path).writeText("script $name of $base:\n\tfn onReady():\n\t\tlog(\"$name is ready\")\n\n\tfn onFrame():\n\t\tpass\n")
@@ -349,7 +467,7 @@ class Studio(val ctx: Context) {
             } catch (t: Throwable) { error("Cannot load the built scripts: ${t.message}"); return }
         }
         val remap = lowered
-        val engine = Engine({ io.readText(it) }, metas, host, { info(it) }, { remap?.remap(it) ?: it }, { sounds.play(it) })
+        val engine = Engine({ io.readText(it) }, metas, host, { info(it) }, { remap?.remap(it) ?: it }, { sounds.play(it) }, { sounds.control(it) })
         engine.screenW = p.gameWidth.toDouble(); engine.screenH = p.gameHeight.toDouble()
         if (host != null) { host.engine = engine; host.start()?.let { error("script init: ${remap?.remap(it) ?: it}"); return } }
         if (!engine.loadScene(scene)) return
@@ -366,7 +484,7 @@ class Studio(val ctx: Context) {
     }
 
     // ------------------------------------------------------------------ export
-    fun export(pkg: String, label: String, install: Boolean) {
+    fun export(pkg: String, label: String, install: Boolean, toDownloads: Boolean = false) {
         val p = project ?: return
         p.packageId = pkg; p.title = label; p.save()
         build { ok ->
@@ -381,7 +499,14 @@ class Studio(val ctx: Context) {
                     val opt = if (keystore != null) ExportOptions(pkg, label, out, keystore, setting("keystore_pass", "nebula"), setting("keystore_alias", "nebula"), setting("keystore_key_pass", "nebula"))
                               else ExportOptions(pkg, label, out)
                     val f = ApkExporter.export(ctx, p, opt, so, meta)
-                    post { building = false; status = "Exported"; info("Exported ${f.absolutePath} (${f.length() / 1024} KB)"); if (install) Installer.install(ctx, f) { info(it) } }
+                    var saved: String? = null; var saveError: String? = null
+                    if (toDownloads) try { saved = Downloads.saveApk(ctx, f) } catch (e: Exception) { saveError = e.message }
+                    post {
+                        building = false; status = "Exported"; info("Exported ${f.absolutePath} (${f.length() / 1024} KB)")
+                        if (saved != null) info("Copied to $saved")
+                        if (saveError != null) error("Could not copy to Downloads: $saveError")
+                        if (install) Installer.install(ctx, f) { info(it) }
+                    }
                 } catch (e: Throwable) { post { building = false; status = "Export failed"; error("Export failed: ${e.message}") } }
             }.start()
         }

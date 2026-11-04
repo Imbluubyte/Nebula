@@ -146,6 +146,11 @@ private fun CenterContent(studio: Studio) {
     when (studio.centerTab) {
         CenterTab.Scene -> ViewportPanel(studio, Modifier.fillMaxSize())
         CenterTab.Script -> ScriptEditorPanel(studio, Modifier.fillMaxSize())
-        CenterTab.Game -> studio.game?.let { g -> GameView(g.engine, g.images, g.w, g.h, Modifier.fillMaxSize()) }
+        CenterTab.Game -> studio.game?.let { g ->
+            Box(Modifier.fillMaxSize()) {
+                GameView(g.engine, g.images, g.w, g.h, Modifier.fillMaxSize(), showFps = studio.showFps)
+                Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) { TextBtn(if (studio.showFps) "FPS: on" else "FPS: off", { studio.toggleFps() }) }
+            }
+        }
     }
 }

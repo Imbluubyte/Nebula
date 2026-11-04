@@ -41,14 +41,33 @@ object Renderer {
         return out.sortedWith(compareBy<DrawItem> { it.node.f("layer") }.thenBy { it.order })
     }
 
+    /** What a Sprite shows: the picture, how it is cut into cells, and the cell (0-based) to draw. */
+    class SpriteView(val image: String, val cols: Int, val rows: Int, val cell: Int)
+
+    /**
+     * With an animation set the picture and grid come from the `.nanim` file; otherwise from the sprite's own
+     * image / hframes / vframes. The `frame` property is 1-based. In the editor an animated sprite shows the first frame of its clip.
+     */
+    fun spriteView(n: SceneNode, images: ImageCache?, editor: Boolean): SpriteView {
+        val path = n.s("animations")
+        val anim = if (path.isNotEmpty()) images?.anims?.get(path) else null
+        val image = if (anim != null && anim.sheet.isNotEmpty()) anim.sheet else n.s("image")
+        val cols = (if (anim != null) anim.cols else n.f("hframes").toInt()).coerceAtLeast(1)
+        val rows = (if (anim != null) anim.rows else n.f("vframes").toInt()).coerceAtLeast(1)
+        var frame = n.f("frame").toInt()
+        if (editor && anim != null) anim.clip(n.s("animation"))?.let { frame = it.from }
+        return SpriteView(image, cols, rows, (frame - 1).coerceIn(0, cols * rows - 1))
+    }
+
     /** Size in game units used for drawing and hit-testing. */
     fun sizeOf(n: SceneNode, images: ImageCache?): Pair<Double, Double> {
         val s = n.f("scale").let { if (it == 0.0) 1.0 else it }
         return when (n.type) {
             "Sprite" -> {
-                val bmp = images?.get(n.s("image"))
-                val w = if (n.f("width") > 0) n.f("width") else bmp?.width?.toDouble() ?: 64.0
-                val h = if (n.f("height") > 0) n.f("height") else bmp?.height?.toDouble() ?: 64.0
+                val v = spriteView(n, images, true)
+                val bmp = images?.get(v.image)
+                val w = if (n.f("width") > 0) n.f("width") else if (bmp != null) bmp.width.toDouble() / v.cols else 64.0
+                val h = if (n.f("height") > 0) n.f("height") else if (bmp != null) bmp.height.toDouble() / v.rows else 64.0
                 w * s to h * s
             }
             "Shape", "Button", "Body" -> n.f("width") * s to n.f("height") * s
@@ -78,11 +97,13 @@ object Renderer {
                 }
                 "Sprite" -> {
                     val (w, h) = sizeOf(n, images)
-                    val bmp = images?.get(n.s("image"))
+                    val v = spriteView(n, images, editor)
+                    val bmp = images?.get(v.image)
                     if (bmp != null) {
                         val flip = n.b("flipX")
+                        val cw = (bmp.width / v.cols).coerceAtLeast(1); val ch = (bmp.height / v.rows).coerceAtLeast(1)
                         scale(if (flip) -1f else 1f, 1f, Offset(cx, cy)) {
-                            drawImage(bmp, srcOffset = androidx.compose.ui.unit.IntOffset.Zero, srcSize = IntSize(bmp.width, bmp.height),
+                            drawImage(bmp, srcOffset = androidx.compose.ui.unit.IntOffset((v.cell % v.cols) * cw, (v.cell / v.cols) * ch), srcSize = IntSize(cw, ch),
                                 dstOffset = androidx.compose.ui.unit.IntOffset((cx - w / 2).toInt(), (cy - h / 2).toInt()), dstSize = IntSize(w.toInt(), h.toInt()))
                         }
                     } else if (editor) {

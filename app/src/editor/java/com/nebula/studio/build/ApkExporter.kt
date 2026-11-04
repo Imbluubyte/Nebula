@@ -14,16 +14,27 @@ class ExportOptions(val packageId: String, val label: String, val outFile: File,
                     val storePass: String = "nebula", val alias: String = "nebula", val keyPass: String = "nebula")
 
 /**
- * Exports a game as an installable APK: Nebula's own APK is the player. We copy it, add the project files
- * (assets/project/) and libscripts.so, give it the game's package id and name, align it and sign it.
+ * Exports a game as an installable APK. The base is the slim player APK that ships inside the editor
+ * (assets/player.apk: no editor code at all). We copy it, add the project files (assets/project/) and
+ * libscripts.so, give it the game's package id and name, align it and sign it.
  */
 object ApkExporter {
     private const val BASE_PACKAGE = "com.nebula.studio"
     private val skip = Regex("""META-INF/.*|assets/nebula-debug\.p12""")
+    private const val PLAYER_ASSET = "player.apk"
+
+    /** The player APK to copy: the slim one embedded in the editor, or (an editor build without it) the editor itself. */
+    private fun baseApk(ctx: Context): Pair<File, Boolean> {
+        val out = File(ctx.cacheDir, "player-base.apk")
+        return try {
+            ctx.assets.open(PLAYER_ASSET).use { i -> out.outputStream().use { i.copyTo(it) } }
+            out to true
+        } catch (e: java.io.IOException) { File(ctx.applicationInfo.sourceDir) to false }
+    }
 
     fun export(ctx: Context, project: Project, opt: ExportOptions, scriptsSo: File?, metaText: String): File {
         require(Regex("""[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+""").matches(opt.packageId)) { "package id must look like com.example.mygame" }
-        val base = File(ctx.applicationInfo.sourceDir)
+        val (base, slim) = baseApk(ctx)
         val unsigned = File(ctx.cacheDir, "export-unsigned.apk")
         FileOutputStream(unsigned).use { fos ->
             val zip = AlignedZip(fos.buffered())
@@ -53,7 +64,7 @@ object ApkExporter {
         ApkSigner.Builder(listOf(ApkSigner.SignerConfig.Builder("nebula", key, listOf(cert)).build()))
             .setInputApk(unsigned).setOutputApk(opt.outFile).setMinSdkVersion(30)
             .setV1SigningEnabled(false).setV2SigningEnabled(true).setV3SigningEnabled(true).build().sign()
-        unsigned.delete()
+        unsigned.delete(); if (slim) base.delete()
         return opt.outFile
     }
 

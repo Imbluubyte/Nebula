@@ -18,14 +18,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.9
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+      - name: Build the editor (it embeds the shrunk player APK)
+        run: gradle --no-daemon assembleEditorDebug
+      - name: Player is slim and carries no editor code
+        run: |
+          P=app/build/outputs/apk/player/release/app-player-release-unsigned.apk
+          E=app/build/outputs/apk/editor/debug/app-editor-debug.apk
+          ls -l "$P" "$E"
+          unzip -l "$E" | grep -q 'assets/player.apk'
+          ! unzip -l "$P" | grep -E 'nebula\.sn|player\.apk|nebula-debug\.p12'
+          unzip -p "$P" 'classes*.dex' | strings | grep -c 'StudioScreen' | grep -qx 0
+          unzip -p "$P" 'classes*.dex' | strings | grep -c 'ApkExporter' | grep -qx 0
+          echo "player APK has no editor classes"
       - name: Exporter self-check (manifest patch and zip alignment on the real APK)
         run: |
           curl -sSL -o kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
           unzip -q kotlin.zip -d "$HOME"
-          "$HOME/kotlinc/bin/kotlinc" -nowarn app/src/main/java/com/nebula/studio/build/AxmlPatcher.kt app/src/main/java/com/nebula/studio/build/ZipAlign.kt tools/ExporterCheck.kt -include-runtime -d check.jar
-          java -jar check.jar app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/patched.apk"
+          "$HOME/kotlinc/bin/kotlinc" -nowarn app/src/editor/java/com/nebula/studio/build/AxmlPatcher.kt app/src/editor/java/com/nebula/studio/build/ZipAlign.kt tools/ExporterCheck.kt -include-runtime -d check.jar
+          java -jar check.jar app/build/outputs/apk/player/release/app-player-release-unsigned.apk "$RUNNER_TEMP/patched.apk"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -E "^package:|application-label:|uses-permission: name='com.example"
           "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -q "package: name='com.example.testgame'"
@@ -39,7 +49,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: nebula-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/editor/debug/*.apk
 
   core-tests:
     runs-on: ubuntu-latest

@@ -15,6 +15,8 @@ Projects without scripts need none of the Termux steps. Scripts are compiled to 
 
 ## 2. The editor
 
+* **Files tab**: folders for scenes, scripts, animations and assets. Use the folder buttons to create folders (and subfolders); tap a folder to
+  make it the target for imports, new scenes, new scripts and new animation sets. Tap a sound to hear it.
 * **Left**: the scene tree (and a Files tab). A script appears as a row *under* its node. Tap to select, long-press to rename,
   the buttons above the tree add scripts, duplicate, move, indent/outdent and delete.
 * **Centre**: the scene view (1 finger on a node drags it, on empty space pans, 2 fingers pan/zoom; buttons for zoom, grid, snap),
@@ -33,18 +35,25 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | --- | --- | --- |
 | Node | plain container | |
 | Node2D | position holder / group | x, y, rotation (degrees), scale, layer, visible, touchable |
-| Sprite | picture | image, flipX, width, height |
+| Sprite | picture or animated sprite sheet | image, flipX, width, height, hframes, vframes, frame, animations, animation, playing, speed |
 | Shape | rectangle or circle | shape, width, height, color |
 | Label | text | text, fontSize, color |
 | Button | on-screen button | text, width, height, color, **action** |
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
 | Camera | view centre | zoom |
-| Sound | sound holder | file |
+| Sound | sound player | file, volume, pitch, loop, autoplay |
 
 Positions are in game units (project size, default 1280x720, y grows downward) and add up through parents.
 A **Button with an `action`** (`left`, `right`, `up`, `down`, `jump`, `action`) counts as that action while held: scripts read it with `isDown("left")` /
 `axis("left", "right")`. The keyboard (arrows/WASD, space, Z) feeds the same actions.
 **Body**: gravity pulls it down; a body that is `solid` and `static` is ground that other bodies stand on (`onGround()` becomes true).
+
+### Sounds and animation
+* **Sound effects**: import `.wav`/`.ogg`/`.mp3` files, then call `play("assets/hit.wav")` from a script, or add a **Sound** node (volume, pitch, loop, autoplay)
+  and call `start()` / `stop()` on it.
+* **Animations**: import a sprite sheet image, tap the film icon in the Files tab to make an animation set, choose the sheet, enter its columns and rows,
+  add clips (tap the sheet to pick the first and last frame, set speed and loop). Give a Sprite the set and a clip in the inspector,
+  or play one from a script with `animate("run")`. A clip that does not loop sends `animationFinished`.
 
 ## 4. Scripts: SuperNova plus the Nebula layer
 
@@ -97,17 +106,19 @@ Buttons are touchable), `collided(other)` (Body), `freed` (every node). Handlers
 `save("key", value)` / `load("key", "fallback")`, tree: `name()`, `parent()`, `child(i)`, `children()`, `add("Sprite", "Name")`, `free()`, `tag("x")`, `hasTag("x")`;
 `nebula.nodesTagged("enemy")` for all tagged nodes; `Vec2(x, y)` with `plus minus times length normalized distanceTo`.
 Node2D: `x() y() position() setPosition(x,y) moveBy(dx,dy) rotation() setRotation(d) turnBy(d) setScale(s) setVisible(b) setLayer(n) setTouchable(b)`.
-Sprite: `setImage(file) setFlipX(b)`. Shape: `setColor("#RRGGBB") setSize(w,h)`. Label: `setText(x) setColor() setFontSize()`.
+Sprite: `setImage(file) setFlipX(b) animate("clip") stopAnimating() setAnimSpeed(x) setFrame(n)`. Sound: `start() stop() setVolume(v) setPitch(p) setLoop(b)`. Shape: `setColor("#RRGGBB") setSize(w,h)`. Label: `setText(x) setColor() setFontSize()`.
 Body: `velocity() setVelocity(vx,vy) push(dvx,dvy) setGravity(g) onGround()`. Camera: `setZoom(z)`.
-The full list is `api/nebula.sn` (plain SuperNova: read it).
+The full list is `api/nebula.sn` (plain SuperNova: read it). Every Nebula syntax form is explained in `docs/SYNTAX.md`.
 
 ## 5. Run, build, export
 
 * **Run** (F5) saves, builds the scripts through Termux (a few seconds), and plays the main scene in the editor. Compile errors show in the console with the
   `.nbs` file and line; tap to jump. Mistakes in Nebula syntax are shown live in the editor as you type.
-* **Export APK** (Ctrl+E): enter app name and package id (`com.you.mygame`). Nebula copies its own player, adds your project and scripts, signs it and can install it.
+* **Test tools**: **F3** (or the FPS button over the running game) shows a frames-per-second counter.
+* **Export APK** (Ctrl+E): enter app name and package id (`com.you.mygame`). Nebula packs your project and scripts into its slim player, signs it and can install it.
+  Turn on *Also save a copy to the Downloads folder* to get the APK in `Download/` as well (it is always kept in the project's `export/` folder).
   The default signing key is a built-in debug key (fine for sideloading); for a store release choose your own PKCS12 keystore in Settings.
-  The export is arm64 only. Exported games contain the player code, so they are larger than a bare game would be.
+  The export is arm64 only. The player contains only what is needed to run a game: no editor screens, compiler bridge or signing code.
 
 ## 6. Project folder
 
@@ -116,6 +127,7 @@ NebulaProjects/MyGame/
   project.nebula        title, main scene, package id, size, orientation
   scenes/*.nscn         text scenes (readable, git-friendly)
   scripts/*.nbs
+  animations/*.nanim    sprite sheet animation sets (made in the animation manager)
   assets/               images (.png .jpg .webp) and sounds (.wav .ogg .mp3), imported from the Files tab
   build/                generated: game.sn, scripts.meta, libscripts.so
   export/               exported APKs

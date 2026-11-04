@@ -5,12 +5,16 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -27,23 +31,32 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.sp
 import nebula.core.Engine
 import com.nebula.studio.runtime.Renderer.drawNode
 
 /** Letterboxed game surface: runs the engine every frame, draws the tree, feeds touch and keyboard in. */
 @Composable
-fun GameView(engine: Engine, images: ImageCache, gameW: Int, gameH: Int, modifier: Modifier = Modifier) {
+fun GameView(engine: Engine, images: ImageCache, gameW: Int, gameH: Int, modifier: Modifier = Modifier, showFps: Boolean = false) {
     var frame by remember { mutableLongStateOf(0L) }
+    var fps by remember { mutableIntStateOf(0) }
     var size by remember { mutableStateOfSize() }
     val focus = remember { FocusRequester() }
 
     LaunchedEffect(engine) {
         focus.requestFocus()
-        var last = 0L
+        var last = 0L; var acc = 0.0; var count = 0
         while (true) {
             androidx.compose.runtime.withFrameNanos { t ->
-                if (last != 0L) engine.update(((t - last) / 1e9).coerceAtMost(0.05))
+                if (last != 0L) {
+                    val dt = (t - last) / 1e9
+                    engine.update(dt.coerceAtMost(0.05))
+                    acc += dt; count++
+                    if (acc >= 0.5) { fps = Math.round(count / acc).toInt(); acc = 0.0; count = 0 }     // frames per second, averaged over half a second
+                }
                 last = t; frame = t
             }
         }
@@ -100,6 +113,9 @@ fun GameView(engine: Engine, images: ImageCache, gameW: Int, gameH: Int, modifie
                 }) { for (item in Renderer.collect(engine.tree)) drawNode(item, images, false) }
             }
         }
+        if (showFps) BasicText("$fps FPS",
+            style = TextStyle(color = Color(0xFF66FF66), fontSize = 13.sp, fontFamily = FontFamily.Monospace),
+            modifier = Modifier.align(Alignment.TopStart).padding(8.dp).background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
 

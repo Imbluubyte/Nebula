@@ -36,6 +36,7 @@ object Commands {
             val i = s.scripts.indexOfFirst { it.path == s.activeScript }; s.activeScript = s.scripts[(i + 1) % s.scripts.size].path; s.centerTab = CenterTab.Script },
         Command("closeScript", "Close script tab", "Ctrl+W", { it.activeScript != null }) { s -> s.activeScript?.let { s.closeScript(it) } },
         Command("grid", "Toggle grid", "Ctrl+G", ::hasProject) { it.showGrid = !it.showGrid },
+        Command("fps", "Toggle FPS counter", "F3", ::hasProject) { it.toggleFps() },
         Command("settings", "Project settings", "Ctrl+,", ::hasProject) { it.modal = Modal.Settings },
         Command("palette", "Command palette", "Ctrl+Shift+P", { true }) { it.modal = Modal.Palette },
         Command("help", "Help and shortcuts", "F1", { true }) { it.modal = Modal.Help },
