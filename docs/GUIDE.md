@@ -92,12 +92,12 @@ Use `use std.math` (and friends) at the top of the file.
 | `@Path as Sprite` | the same node as that type, so its methods work (`(@Icon as Sprite).setImage("a.png")`). Works for built-in types and your scripts |
 | `broadcast hit(amount: Int)` | declares a broadcast (a signal) with typed parameters |
 | `shout hit(5)` | sends it (only your own broadcasts) |
-| `hear hit -> onHit` | listen to your own broadcast |
-| `hear hit from @Enemy as EnemyScript -> onHit` | listen to another node's broadcast |
+| `fn onHear(hit, amount):` | listen to your own broadcast; the body is the handler |
+| `fn onHear(@Enemy.hit, amount):` | listen to the broadcast of another node. Values match by position, `as Type` only if the name is ambiguous |
 | `spawn "enemy.nscn" under @/World` | instance a scene as a child (add `as Type` for the result) |
 | `wait 1.5` | pause an `async fn` for 1.5 seconds |
 
-A handler may take fewer parameters than the broadcast sends. Built-in broadcasts: `tapped(x, y)` (Node2D, needs `touchable`;
+An `onHear` may list fewer names than the broadcast sends, and you can have several as long as they listen to different broadcasts. Built-in broadcasts: `tapped(x, y)` (Node2D, needs `touchable`;
 Buttons are touchable), `collided(other)` (Body), `freed` (every node). Handlers of freed nodes are skipped automatically.
 
 ### What every script can call (bare, inherited from `nebula.Node`)

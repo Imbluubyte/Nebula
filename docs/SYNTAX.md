@@ -59,11 +59,14 @@ var boss = @/World/Boss as BossScript
 | --- | --- |
 | `broadcast hit(amount: Int)` | declares a broadcast with typed parameters (none needed: `broadcast died`) |
 | `shout hit(5)` | sends it. Only broadcasts of your own script can be shouted |
-| `hear hit -> onHit` | calls `onHit` whenever your own `hit` is shouted |
-| `hear hit from @Enemy as EnemyScript -> onHit` | listens to another node's broadcast; the `as` type says whose broadcast it is |
-| `hear collided -> onTouch` | built-in broadcasts work the same way |
+| `fn onHear(@Enemy.hit, damage):` | the body runs whenever the node at `@Enemy` shouts `hit`; `damage` is the first value it sent |
+| `fn onHear(@Enemy.hit, damage, accuracy):` | values are matched by position: `shout hit(5, 10)` gives `damage = 5`, `accuracy = 10` |
+| `fn onHear(@Enemy as Boss.hit, damage):` | `as Type` says whose broadcast it is. Only needed when several types have a broadcast called `hit` |
+| `fn onHear(hit, damage):` | no `@`: listens to your own broadcast (built-ins too: `fn onHear(collided, other):`) |
 
-A handler may take fewer parameters than the broadcast sends. Handlers whose node was freed are skipped automatically.
+`@Enemy` is any node path. The type is found from the broadcast name, so `@Enemy.hit` works when only one script (or built-in node) declares `hit`.
+A handler may list fewer names than the broadcast sends. You can write several `onHear`s, as long as each listens to a different node or broadcast.
+They connect just before `onReady()` runs, so every node in the scene already exists. Handlers whose node was freed are skipped automatically.
 
 Built-in broadcasts:
 

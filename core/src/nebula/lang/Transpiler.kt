@@ -28,7 +28,7 @@ class Lowered(val source: String, val metas: List<ScriptMeta>, val diags: List<D
  * Lowers Nebula scripts (.nbs) to one plain SuperNova file (game.sn).
  * Nebula adds these forms on top of SuperNova (see docs/GUIDE.md):
  *   script Name of Base:          tweak x = 1            broadcast hit(n: Int)     shout hit(3)
- *   hear hit -> handler           hear hit from @Path as Type -> handler
+ *   fn onHear(hit, n):            fn onHear(@Path.hit, n):     fn onHear(@Path as Type.hit, n):
  *   fn onTick(30):  fn onEvery(2.5):  fn onFrame():       @Path  @A/B  @^  @/Abs   as Type
  *   spawn "a.nscn" under @Parent      wait 1.5
  */
@@ -201,11 +201,24 @@ object Transpiler {
         return out
     }
 
-    /** Number of arguments of broadcast [bc] on [type] (a script or node type), or -1. */
-    private fun arity(type: String, bc: String, metas: Map<String, ScriptMeta>): Int {
-        for (m in userChain(type, metas)) m.broadcasts.firstOrNull { it.name == bc }?.let { return it.params.size }
+    /** Parameter types of broadcast [bc] on [type] (a script or node type), or null if it has none by that name. */
+    private fun bcTypes(type: String, bc: String, metas: Map<String, ScriptMeta>): List<String>? {
+        for (m in userChain(type, metas)) m.broadcasts.firstOrNull { it.name == bc }?.let { return it.params.map { p -> p.second } }
         val builtin = userChain(type, metas).lastOrNull()?.base ?: type
-        return NodeTypes.broadcastsOf(builtin).firstOrNull { it.name == bc }?.arity ?: -1
+        return NodeTypes.broadcastsOf(builtin).firstOrNull { it.name == bc }?.types
+    }
+    /** Number of arguments of broadcast [bc] on [type], or -1. */
+    private fun arity(type: String, bc: String, metas: Map<String, ScriptMeta>) = bcTypes(type, bc, metas)?.size ?: -1
+
+    /** The one script or built-in type that declares broadcast [bc]; throws if there is none or several. */
+    private fun ownerOf(bc: String, metas: Map<String, ScriptMeta>): String {
+        val found = (metas.values.filter { m -> m.broadcasts.any { it.name == bc } }.map { it.name } +
+            NodeTypes.all.filter { t -> t.broadcasts.any { it.name == bc } }.map { it.name }).distinct()
+        return when (found.size) {
+            0 -> throw LowerError("no node type has a broadcast called '$bc'")
+            1 -> found[0]
+            else -> throw LowerError("'$bc' exists on ${found.joinToString(", ")}: say which, for example fn onHear(@Path as ${found[0]}.$bc, ...)")
+        }
     }
 
     private fun qualify(t: String) = if (t in NodeTypes.scriptClassNames) "nebula.$t" else t
@@ -228,6 +241,7 @@ object Transpiler {
         }
         out.add("var _reg_${s.name}: Dict[Int, ${s.name}] = {}", file, s.headerLine)
         out.add("class ${s.name} extends ${baseRef(s.base, metas)}:", file, s.headerLine)
+        val hearKeys = HashSet<String>(); val connects = ArrayList<Pair<Int, String>>()
 
         // generated constructor: registers the object and loads tweak overrides
         out.add("\tfn onCreation(id: Int):")
@@ -256,6 +270,8 @@ object Transpiler {
                 } ?: everyRe.matchEntire(trimmed)?.let { m ->
                     add("fn nbEvery_${Math.round(m.groupValues[1].toDouble() * 1000)}(delta: Float):")
                 } ?: frameRe.matchEntire(trimmed)?.let { m -> add("fn onFrame(${m.groupValues[1].ifEmpty { "delta" }}: Float):")
+                } ?: onHearRe.matchEntire(trimmed)?.let { m ->
+                    add(onHear(m.groupValues[1], s, metas, hearKeys) { connects.add(ln to it) })
                 } ?: run {
                     when {
                         trimmed.startsWith("shout ") -> {
@@ -265,7 +281,7 @@ object Transpiler {
                             val args = m.groupValues[2]
                             add("${m.groupValues[1]}.send(${if (args.isBlank()) "" else expr(args, s, metas)})")
                         }
-                        trimmed.startsWith("hear ") -> add(hear(trimmed, s, metas, info.methodParams))
+                        trimmed.startsWith("hear ") -> throw LowerError("'hear' was replaced: write fn onHear(@Node.broadcast, params): ... (or fn onHear(broadcast, params): for your own)")
                         trimmed.startsWith("wait ") -> add("await sleep(${expr(trimmed.removePrefix("wait ").trim(), s, metas)})")
                         trimmed.startsWith("fn ") || trimmed.startsWith("async fn ") -> add(expr(trimmed, s, metas))
                         else -> add(expr(trimmed, s, metas))
@@ -274,6 +290,10 @@ object Transpiler {
             } catch (e: LowerError) { diags.add(Diag(file, ln, e.message ?: "error")); out.add(raw, file, ln) }
         }
 
+        if (connects.isNotEmpty()) {
+            out.add("\tfn nbConnect():"); out.add("\t\tsuper.nbConnect()")
+            for ((ln, c) in connects) out.add("\t\t$c", file, ln)
+        }
         if (meta.ticks.isNotEmpty()) {
             out.add("\tfn nbTickDispatch(rate: Int, delta: Float):"); out.add("\t\tmatch rate:")
             for (n in meta.ticks) { out.add("\t\t\tcase $n:"); out.add("\t\t\t\tnbTick_$n(delta)") }
@@ -295,31 +315,33 @@ object Transpiler {
 
     private class LowerError(m: String) : Exception(m)
 
-    private val hearRe = Regex("""^hear\s+([A-Za-z_]\w*)\s*(?:from\s+(.+?))?\s*->\s*(.+)$""")
+    private val onHearRe = Regex("""^fn\s+onHear\s*\((.*)\)\s*:\s*$""")
+    private val hearSrcRe = Regex("""^(@([\w/^]*)(?:\s+as\s+([A-Za-z_]\w*))?\s*\.\s*)?([A-Za-z_]\w*)$""")
 
-    private fun hear(t: String, s: Script, metas: Map<String, ScriptMeta>, methods: Map<String, Int>): String {
-        val m = hearRe.matchEntire(t) ?: throw LowerError("expected: hear name -> handler   or   hear name from @Path as Type -> handler")
-        val bc = m.groupValues[1]; val from = m.groupValues[2]; val handler = m.groupValues[3].trim()
-        var targetType = s.name; var target = ""
-        if (from.isNotEmpty()) {
-            val asM = Regex("""^(.*\S)\s+as\s+([A-Za-z_]\w*)$""").matchEntire(from.trim())
-            targetType = asM?.groupValues?.get(2) ?: "Node"
-            val raw = asM?.groupValues?.get(1) ?: from.trim()
-            target = expr(raw, s, metas)
-            if (asM != null) target = cast(targetType, target, metas)
-            target += "."
-        }
-        val n = arity(targetType, bc, metas)
-        if (n < 0) throw LowerError(if (from.isNotEmpty() && asNone(from)) "say what kind of node it is: hear $bc from ... as Type -> ..." else "'$targetType' has no broadcast '$bc'")
-        val params = (1..n).joinToString(", ") { "a$it" }
-        // a handler may take fewer parameters than the broadcast sends: only pass what it accepts
-        val used = (1..minOf(n, methods[handler] ?: n)).joinToString(", ") { "a$it" }
-        val fnText = if (handler.startsWith("fn(")) expr(handler, s, metas)
-                     else if (Regex("""[A-Za-z_]\w*""").matches(handler)) "fn($params) => $handler($used)"
-                     else throw LowerError("handler must be a method name")
-        return "${target}$bc.connect($fnText, id)"
+    /**
+     * `fn onHear(@Path.bc, a, b):` listens to broadcast `bc` of the node at `@Path`; `fn onHear(bc, a):` to the script's own.
+     * The values are matched by position; the handler may list fewer names than the broadcast sends.
+     * Lowers the header to a typed method and hands the connect statement (run just before onReady) to [connect].
+     */
+    private fun onHear(inner: String, s: Script, metas: Map<String, ScriptMeta>, seen: MutableSet<String>, connect: (String) -> Unit): String {
+        val parts = inner.split(',').map { it.trim() }
+        val m = hearSrcRe.matchEntire(parts[0])
+            ?: throw LowerError("expected: fn onHear(@Node.broadcast, param, ...):   or   fn onHear(broadcast, param, ...):")
+        val fromNode = m.groupValues[1].isNotEmpty(); val path = m.groupValues[2]; val bc = m.groupValues[4]
+        if (fromNode && path.isEmpty()) throw LowerError("'@' needs a node path, for example @Enemy or @^/Sibling")
+        val type = if (!fromNode) s.name else m.groupValues[3].ifEmpty { ownerOf(bc, metas) }
+        val types = bcTypes(type, bc, metas) ?: throw LowerError("'$type' has no broadcast '$bc'")
+        val names = parts.drop(1)
+        for (p in names) if (!Regex("""[A-Za-z_]\w*""").matches(p)) throw LowerError("'$p' is not a parameter name")
+        if (names.size > types.size) throw LowerError("'$bc' sends ${types.size} value(s) but onHear names ${names.size}")
+        if (!seen.add((if (fromNode) "@$path" else "") + "." + bc)) throw LowerError("onHear for '${parts[0]}' is declared twice")
+        val fn = "nbHear_${s.name}_${seen.size}_$bc"
+        val target = if (fromNode) cast(type, nodePath(path), metas) + "." else ""
+        val lam = types.indices.joinToString(", ") { "a${it + 1}" }
+        val used = names.indices.joinToString(", ") { "a${it + 1}" }
+        connect("$target$bc.connect(fn($lam) => $fn($used), id)")
+        return "fn $fn(" + names.mapIndexed { i, p -> "$p: ${qualify(types[i])}" }.joinToString(", ") + "):"
     }
-    private fun asNone(from: String) = !Regex("""\sas\s""").containsMatchIn(from)
 
     private fun cast(type: String, e: String, metas: Map<String, ScriptMeta>): String = when {
         type == "Node" -> e

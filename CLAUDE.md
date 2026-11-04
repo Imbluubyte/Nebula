@@ -47,7 +47,7 @@ The app module has two flavors. **editor** (`app/src/editor`): Studio, ui, build
 
 | To change / add... | Files |
 | --- | --- |
-| a Nebula script syntax form (`hear`, `shout`, `@path`, `wait`, `tweak`, ...) | `core/src/nebula/lang/Transpiler.kt` (`scan` = metadata, `emit` = lowering per line, `expr` = `@`/spawn/casts/type names, `hear`), then add a test in `core/test/CoreTests.kt`, then `docs/GUIDE.md` |
+| a Nebula script syntax form (`onHear`, `shout`, `@path`, `wait`, `tweak`, ...) | `core/src/nebula/lang/Transpiler.kt` (`scan` = metadata, `emit` = lowering per line, `expr` = `@`/spawn/casts/type names, `onHear` = listener lowering, connected in a generated `nbConnect` that `nbReady` calls before `onReady`), then add a test in `core/test/CoreTests.kt`, then `docs/GUIDE.md` |
 | script metadata format | `lang/MetaFile.kt` (also written by `Builder.build`) |
 | a built-in node type or property | `core/.../NodeTypes.kt` (registry + broadcasts), class + `wrap` case + `asX` cast + registry dict in `api/nebula.sn`, drawing in `app/.../runtime/Renderer.kt`, inspector special cases in `ui/InspectorPanel.kt`, physics/input in `Engine.kt` |
 | sprite sheet animation (`.nanim`), Sound node playback | `core/.../Anim.kt` (format, `Clip.frameAt`), `Engine.animate/serviceSounds`, `NodeTypes.kt` props, `runtime/Renderer.spriteView`, `runtime/ProjectIO.Sounds`, editor: `ui/AnimationManager.kt` + `AnimDoc` in `Studio.kt` |

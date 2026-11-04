@@ -5,8 +5,8 @@ enum class Kind { F, S, B }
 
 data class PropDef(val name: String, val kind: Kind, val default: Any, val hint: String = "")
 
-/** A broadcast every node of this type owns. `arity` is what `hear` needs to build its handler. */
-data class BcDef(val name: String, val arity: Int)
+/** A broadcast every node of this type owns. `types` are the parameter types `fn onHear(...)` gives its handler. */
+data class BcDef(val name: String, val types: List<String> = emptyList()) { val arity get() = types.size }
 
 data class NodeType(
     val name: String,
@@ -23,14 +23,14 @@ object NodeTypes {
     private fun b(n: String, d: Boolean) = PropDef(n, Kind.B, d)
 
     val all: List<NodeType> = listOf(
-        NodeType("Node", null, emptyList(), listOf(BcDef("freed", 0)), "N"),
+        NodeType("Node", null, emptyList(), listOf(BcDef("freed")), "N"),
         NodeType("Node2D", "Node", listOf(
             f("x", 0.0), f("y", 0.0), f("rotation", 0.0), f("scale", 1.0), f("layer", 0.0),
-            b("visible", true), b("touchable", false)), listOf(BcDef("tapped", 2)), "+"),
+            b("visible", true), b("touchable", false)), listOf(BcDef("tapped", listOf("Float", "Float"))), "+"),
         NodeType("Sprite", "Node2D", listOf(s("image", "", "image"), b("flipX", false), f("width", 0.0), f("height", 0.0),
             f("hframes", 1.0), f("vframes", 1.0), f("frame", 1.0),
             s("animations", "", "animations"), s("animation", "", "animation"), b("playing", true), f("speed", 1.0)),
-            listOf(BcDef("animationFinished", 0)), "S"),
+            listOf(BcDef("animationFinished")), "S"),
         NodeType("Shape", "Node2D", listOf(s("shape", "rect", "shape"), f("width", 64.0), f("height", 64.0), s("color", "#4FC3F7", "color")), icon = "R"),
         NodeType("Label", "Node2D", listOf(s("text", "Label"), f("fontSize", 24.0), s("color", "#FFFFFF", "color")), icon = "T"),
         NodeType("Button", "Node2D", listOf(s("text", "Button"), f("width", 160.0), f("height", 64.0),
@@ -38,7 +38,7 @@ object NodeTypes {
         NodeType("Body", "Node2D", listOf(
             f("vx", 0.0), f("vy", 0.0), f("gravity", 0.0), f("width", 32.0), f("height", 32.0),
             b("solid", false), b("static", false), f("bounce", 0.0), b("onGround", false), s("color", "", "color")),
-            listOf(BcDef("collided", 1)), "P"),
+            listOf(BcDef("collided", listOf("Node"))), "P"),
         NodeType("Camera", "Node2D", listOf(f("zoom", 1.0)), icon = "C"),
         NodeType("Sound", "Node", listOf(s("file", "", "sound"), f("volume", 1.0), f("pitch", 1.0), b("loop", false), b("autoplay", false)), icon = "A"),
     )

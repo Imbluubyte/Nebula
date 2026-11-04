@@ -48,7 +48,21 @@ fun main(args: Array<String>) {
     check("bad header", lowerOne("class X:\n").diags.isNotEmpty())
     check("dup onEvery", lowerOne("script A of Node2D:\n\tfn onEvery(2):\n\t\tpass\n\tfn onEvery(2.0):\n\t\tpass\n").diags.any { "twice" in it.message })
     check("unknown base", lowerOne("script A of Wat:\n\tpass\n").diags.any { "unknown base" in it.message })
-    check("hear needs type", lowerOne("script A of Node2D:\n\tfn f():\n\t\thear tapped from @X -> f\n").diags.any { "kind of node" in it.message })
+    fun lowerMany(vararg src: String) = Transpiler.lower(src.mapIndexed { i, t -> ScriptSource("t$i.nbs", t) })
+    val enemySrc = "script Enemy of Node2D:\n\tbroadcast hit(damage: Int, accuracy: Int)\n"
+    val hearSrc = "script Player of Node2D:\n\tvar hp = 100\n" +
+        "\tfn onHear(@/World/Enemy.hit, damage, accuracy):\n\t\thp -= damage\n\tfn onHear(@Other.hit, damage):\n\t\thp -= damage\n" +
+        "\tfn onHear(tapped):\n\t\tpass\n\tfn onHear(@/World/Enemy.freed):\n\t\tpass\n"
+    val hearOut = lowerMany(enemySrc, hearSrc)
+    check("onHear lowers", hearOut.ok && "fn nbHear_Player_1_hit(damage: Int, accuracy: Int):" in hearOut.source &&
+        "_cast_Enemy(nebula.nodeAt(id, \"/World/Enemy\")).hit.connect(fn(a1, a2) => nbHear_Player_1_hit(a1, a2), id)" in hearOut.source &&
+        "fn nbHear_Player_2_hit(damage: Int):" in hearOut.source && "tapped.connect(fn(a1, a2) => nbHear_Player_3_tapped(), id)" in hearOut.source)
+    check("onHear same broadcast twice", lowerMany(enemySrc, hearSrc + "\tfn onHear(@/World/Enemy.hit, damage):\n\t\tpass\n").diags.any { "declared twice" in it.message })
+    check("onHear too many params", lowerMany("script E of Node2D:\n\tbroadcast hit(a: Int)\n", "script P of Node2D:\n\tfn onHear(@X.hit, a, b):\n\t\tpass\n").diags.any { "sends 1" in it.message })
+    check("onHear ambiguous owner", lowerMany("script A of Node2D:\n\tbroadcast hit\n", "script B of Node2D:\n\tbroadcast hit\n", "script P of Node2D:\n\tfn onHear(@X.hit):\n\t\tpass\n").diags.any { "say which" in it.message })
+    check("onHear as Type", lowerMany("script A of Node2D:\n\tbroadcast hit\n", "script B of Node2D:\n\tbroadcast hit\n", "script P of Node2D:\n\tfn onHear(@X as B.hit):\n\t\tpass\n").ok)
+    check("onHear unknown broadcast", lowerOne("script P of Node2D:\n\tfn onHear(@X.nope):\n\t\tpass\n").diags.any { "no node type has a broadcast" in it.message })
+    check("old hear rejected", lowerOne("script A of Node2D:\n\tfn f():\n\t\thear tapped -> f\n").diags.any { "onHear" in it.message })
     check("shout unknown", lowerOne("script A of Node2D:\n\tfn f():\n\t\tshout nope\n").diags.any { "not a broadcast" in it.message })
     check("lone @", lowerOne("script A of Node2D:\n\tfn f():\n\t\tvar x = @\n").diags.any { "node path" in it.message })
     val lo = lowerOne("script A of Node2D:\n\tfn f():\n\t\tvar s = \"mail@x.com\"\n\t\tlog(f\"{@Foo/Bar}\")  # @Ignored\n")
@@ -70,7 +84,7 @@ fun main(args: Array<String>) {
 
     // the new Sprite animation and Sound API must compile through snc
     val apiProj = Project.create(File(tmp, "apitest"), "Api Test")
-    File(apiProj.dir, "scripts/probe.nbs").writeText("script Probe of Sprite:\n\tfn onReady():\n\t\thear animationFinished -> onDone\n\t\tanimate(\"run\")\n\t\tsetAnimations(\"animations/hero.nanim\")\n\t\tsetAnimSpeed(0.5)\n\t\tsetFrame(2.0)\n\t\tlog(frame())\n\t\tlog(isAnimating())\n\t\tlog(animation())\n\t\tstopAnimating()\n\tfn onDone():\n\t\tlog(\"done\")\n")
+    File(apiProj.dir, "scripts/probe.nbs").writeText("script Probe of Sprite:\n\tfn onHear(animationFinished):\n\t\tlog(\"done\")\n\tfn onReady():\n\t\tanimate(\"run\")\n\t\tsetAnimations(\"animations/hero.nanim\")\n\t\tsetAnimSpeed(0.5)\n\t\tsetFrame(2.0)\n\t\tlog(frame())\n\t\tlog(isAnimating())\n\t\tlog(animation())\n\t\tstopAnimating()\n")
     File(apiProj.dir, "scripts/jingle.nbs").writeText("script Jingle of Sound:\n\tfn onReady():\n\t\tsetFile(\"assets/a.wav\")\n\t\tsetVolume(0.5)\n\t\tsetPitch(1.5)\n\t\tsetLoop(true)\n\t\tstart()\n\t\tstop()\n")
     val apiRes = Builder(apiProj, ProcessRunner(), apiDir.absoluteFile, snc).build()
     check("sprite animation + Sound API compile with snc", apiRes.ok, apiRes.messages.joinToString("\n     "))

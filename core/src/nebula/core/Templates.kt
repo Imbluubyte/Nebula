@@ -65,9 +65,12 @@ script Hero of Body:
 
 	broadcast jumped
 
-	fn onReady():
-		hear collided -> onTouch
-		hear tapped from @/World/Jump as Button -> jump
+	fn onHear(@/World/Jump.tapped):
+		jump()
+
+	fn onHear(collided, other):
+		if other.hasTag("coin"):
+			log("touched a coin")
 
 	fn onFrame():
 		setVelocity(axis("left", "right") * speed, velocity().y)
@@ -78,10 +81,6 @@ script Hero of Body:
 		if onGround():
 			push(0.0, -jumpPower)
 			shout jumped
-
-	fn onTouch(other: Node):
-		if other.hasTag("coin"):
-			log("touched a coin")
 """.trimStart(),
         "scripts/coin.nbs" to """
 # A coin: tells the score when the hero touches it, then vanishes.
@@ -90,9 +89,8 @@ script Coin of Body:
 
 	fn onReady():
 		tag("coin")
-		hear collided -> onHit
 
-	fn onHit(other: Node):
+	fn onHear(collided, other):
 		if other.hasTag("hero"):
 			shout collected(10)
 			free()
@@ -102,10 +100,7 @@ script Coin of Body:
 script Score of Label:
 	var total = 0
 
-	fn onReady():
-		hear collected from @/World/Coin as Coin -> addScore
-
-	fn addScore(value: Int):
+	fn onHear(@/World/Coin.collected, value):
 		total += value
 		setText(f"Score {total}")
 

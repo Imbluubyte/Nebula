@@ -131,6 +131,9 @@ class Node:
 		pass
 	fn nbFire(name: String, a: Float, b: Float, other: Int):
 		pass
+	# generated code overrides this to connect the fn onHear(...) handlers; runs just before onReady
+	fn nbConnect():
+		pass
 
 	# tree
 	fn name() -> String:
@@ -445,7 +448,9 @@ fn asSound(n: Node) -> Sound:
 
 # ---- entry points. The generated game file re-exports these with bare names (snc mangles exports of imported modules) ----
 fn nbReady(id: Int):
-	wrap(id).onReady()
+	var n = wrap(id)
+	n.nbConnect()
+	n.onReady()
 
 fn nbFrame(id: Int, delta: Float):
 	var n = nodes.get(id)

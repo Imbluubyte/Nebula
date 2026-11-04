@@ -36,7 +36,7 @@ import com.nebula.studio.Studio
 private val kwSn = setOf("fn", "var", "const", "if", "orif", "else", "while", "for", "in", "return", "break", "continue", "match", "case", "default",
     "and", "or", "not", "has", "repeat", "try", "catch", "finally", "throw", "async", "await", "class", "extends", "enum", "use", "as", "private", "static",
     "true", "false", "null", "self", "super", "pass")
-private val kwNebula = setOf("script", "of", "tweak", "broadcast", "shout", "hear", "from", "wait", "spawn", "under")
+private val kwNebula = setOf("script", "of", "tweak", "broadcast", "shout", "wait", "spawn", "under")
 private val hooks = setOf("onReady", "onFrame", "onTick", "onEvery", "onFree")
 private val cKw = Color(0xFFC792EA); private val cNeb = Color(0xFFFF9E64); private val cStr = Color(0xFFC3E88D)
 private val cCom = Color(0xFF6B7098); private val cNum = Color(0xFFF78C6C); private val cType = Color(0xFF82AAFF); private val cPath = Color(0xFF89DDFF)
