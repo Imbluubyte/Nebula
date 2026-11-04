@@ -20,6 +20,17 @@ jobs:
           gradle-version: 8.9
       - name: Build debug APK
         run: gradle --no-daemon assembleDebug
+      - name: Exporter self-check (manifest patch and zip alignment on the real APK)
+        run: |
+          curl -sSL -o kotlin.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip
+          unzip -q kotlin.zip -d "$HOME"
+          "$HOME/kotlinc/bin/kotlinc" -nowarn app/src/main/java/com/nebula/studio/build/AxmlPatcher.kt app/src/main/java/com/nebula/studio/build/ZipAlign.kt tools/ExporterCheck.kt -include-runtime -d check.jar
+          java -jar check.jar app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/patched.apk"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -E "^package:|application-label:|uses-permission: name='com.example"
+          "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -q "package: name='com.example.testgame'"
+          "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -q "application-label:'Test Game Label'"
+          "$BT/zipalign" -c 4 "$RUNNER_TEMP/patched.apk" && echo "zip alignment OK"
       - uses: actions/upload-artifact@v4
         with:
           name: nebula-debug-apk
