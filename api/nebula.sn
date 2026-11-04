@@ -1,0 +1,448 @@
+# nebula.sn - the scripting API Nebula ships to every game. Plain SuperNova.
+# The engine (Kotlin) implements the `extern fn` block and calls the `export fn` block.
+# Node ids are Ints. Game scripts never touch ids: they use the Node classes below.
+
+use std.math
+
+# ---- provided by the engine -------------------------------------------------
+extern fn nb_log(message: String)
+extern fn nb_find(from: Int, path: String) -> Int
+extern fn nb_parent(id: Int) -> Int
+extern fn nb_type(id: Int) -> String
+extern fn nb_child_count(id: Int) -> Int
+extern fn nb_child_at(id: Int, index: Int) -> Int
+extern fn nb_add(parent: Int, kind: String, name: String) -> Int
+extern fn nb_spawn(scene: String, parent: Int) -> Int
+extern fn nb_free(id: Int)
+extern fn nb_has(id: Int, prop: String) -> Bool
+extern fn nb_alive(id: Int) -> Bool
+extern fn nb_get_f(id: Int, prop: String) -> Float
+extern fn nb_get_s(id: Int, prop: String) -> String
+extern fn nb_get_b(id: Int, prop: String) -> Bool
+extern fn nb_set_f(id: Int, prop: String, value: Float)
+extern fn nb_set_s(id: Int, prop: String, value: String)
+extern fn nb_set_b(id: Int, prop: String, value: Bool)
+extern fn nb_tag(id: Int, tag: String, on: Bool)
+extern fn nb_has_tag(id: Int, tag: String) -> Bool
+extern fn nb_tagged_count(tag: String) -> Int
+extern fn nb_tagged_at(tag: String, index: Int) -> Int
+extern fn nb_down(action: String) -> Bool
+extern fn nb_axis(negative: String, positive: String) -> Float
+extern fn nb_touch_count() -> Int
+extern fn nb_touch_x(index: Int) -> Float
+extern fn nb_touch_y(index: Int) -> Float
+extern fn nb_screen_w() -> Float
+extern fn nb_screen_h() -> Float
+extern fn nb_sound(file: String)
+extern fn nb_goto(scene: String)
+extern fn nb_store(key: String, value: String)
+extern fn nb_fetch(key: String) -> String
+
+# ---- registries (one per node class, so `@Path as Type` can hand back the real class) ----
+var nodes: Dict[Int, Node] = {}
+var node2ds: Dict[Int, Node2D] = {}
+var sprites: Dict[Int, Sprite] = {}
+var shapes: Dict[Int, Shape] = {}
+var labels: Dict[Int, Label] = {}
+var buttons: Dict[Int, Button] = {}
+var bodies: Dict[Int, Body] = {}
+var cameras: Dict[Int, Camera] = {}
+var sounds: Dict[Int, Sound] = {}
+
+# ---- small value types ---------------------------------------------------------
+class Vec2:
+	var x = 0.0
+	var y = 0.0
+	fn onCreation(x: Float = 0.0, y: Float = 0.0):
+		self.x = x
+		self.y = y
+	fn plus(o: Vec2) -> Vec2:
+		return Vec2(x + o.x, y + o.y)
+	fn minus(o: Vec2) -> Vec2:
+		return Vec2(x - o.x, y - o.y)
+	fn times(k: Float) -> Vec2:
+		return Vec2(x * k, y * k)
+	fn length() -> Float:
+		return math.sqrt(x * x + y * y)
+	fn distanceTo(o: Vec2) -> Float:
+		return minus(o).length()
+	fn normalized() -> Vec2:
+		var l = length()
+		if l == 0.0:
+			return Vec2(0.0, 0.0)
+		return Vec2(x / l, y / l)
+	fn toString() -> String:
+		return f"({x}, {y})"
+
+# ---- broadcasts -------------------------------------------------------------------
+# A broadcast keeps (handler, owner) pairs. Handlers whose owner node was freed are skipped.
+class Bc0:
+	var handlers: List[Fn()] = []
+	var owners: List[Int] = []
+	fn connect(handler: Fn(), owner: Int):
+		handlers.add(handler)
+		owners.add(owner)
+	fn send():
+		for i in 1..handlers.length():
+			if nb_alive(owners[i]):
+				handlers[i]()
+
+class BcNode:
+	var handlers: List[Fn(Node)] = []
+	var owners: List[Int] = []
+	fn connect(handler: Fn(Node), owner: Int):
+		handlers.add(handler)
+		owners.add(owner)
+	fn send(other: Node):
+		for i in 1..handlers.length():
+			if nb_alive(owners[i]):
+				handlers[i](other)
+
+class BcPoint:
+	var handlers: List[Fn(Float, Float)] = []
+	var owners: List[Int] = []
+	fn connect(handler: Fn(Float, Float), owner: Int):
+		handlers.add(handler)
+		owners.add(owner)
+	fn send(x: Float, y: Float):
+		for i in 1..handlers.length():
+			if nb_alive(owners[i]):
+				handlers[i](x, y)
+
+# ---- nodes ----------------------------------------------------------------------------
+class Node:
+	var id = 0
+	var freed = Bc0()
+	fn onCreation(id: Int):
+		self.id = id
+		nodes[id] = self
+
+	# lifecycle hooks: override them in a script
+	fn onReady():
+		pass
+	fn onFrame(delta: Float):
+		pass
+	fn onFree():
+		pass
+	# the engine calls these two; generated script code overrides them
+	fn nbTickDispatch(rate: Int, delta: Float):
+		pass
+	fn nbEveryDispatch(ms: Int, delta: Float):
+		pass
+	fn nbFire(name: String, a: Float, b: Float, other: Int):
+		pass
+
+	# tree
+	fn name() -> String:
+		return nb_get_s(id, "name")
+	fn rename(value: String):
+		nb_set_s(id, "name", value)
+	fn kind() -> String:
+		return nb_type(id)
+	fn parent() -> Node:
+		var p = nb_parent(id)
+		if p == 0:
+			throw f"node '{name()}' has no parent"
+		return wrap(p)
+	fn childCount() -> Int:
+		return nb_child_count(id)
+	fn child(index: Int) -> Node:
+		return wrap(nb_child_at(id, index))
+	fn children() -> List[Node]:
+		var out: List[Node] = []
+		for i in 1..nb_child_count(id):
+			out.add(wrap(nb_child_at(id, i)))
+		return out
+	fn add(kind: String, name: String) -> Node:
+		return wrap(nb_add(id, kind, name))
+	fn free():
+		nb_free(id)
+	fn alive() -> Bool:
+		return nb_alive(id)
+	fn tag(label: String):
+		nb_tag(id, label, true)
+	fn untag(label: String):
+		nb_tag(id, label, false)
+	fn hasTag(label: String) -> Bool:
+		return nb_has_tag(id, label)
+
+	# helpers every script can call bare
+	fn log(message):
+		nb_log(str(message))
+	fn isDown(action: String) -> Bool:
+		return nb_down(action)
+	fn axis(negative: String, positive: String) -> Float:
+		return nb_axis(negative, positive)
+	fn play(file: String):
+		nb_sound(file)
+	fn goto(scene: String):
+		nb_goto(scene)
+	fn touches() -> List[Vec2]:
+		var out: List[Vec2] = []
+		for i in 1..nb_touch_count():
+			out.add(Vec2(nb_touch_x(i), nb_touch_y(i)))
+		return out
+	fn screenSize() -> Vec2:
+		return Vec2(nb_screen_w(), nb_screen_h())
+	fn save(key: String, value):
+		nb_store(key, str(value))
+	fn load(key: String, fallback: String = "") -> String:
+		var v = nb_fetch(key)
+		if v == "":
+			return fallback
+		return v
+
+class Node2D extends Node:
+	var tapped = BcPoint()
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		node2ds[id] = self
+	fn nbFire(name: String, a: Float, b: Float, other: Int):
+		if name == "tapped":
+			tapped.send(a, b)
+	fn x() -> Float:
+		return nb_get_f(id, "x")
+	fn y() -> Float:
+		return nb_get_f(id, "y")
+	fn position() -> Vec2:
+		return Vec2(nb_get_f(id, "x"), nb_get_f(id, "y"))
+	fn setPosition(x: Float, y: Float):
+		nb_set_f(id, "x", x)
+		nb_set_f(id, "y", y)
+	fn moveBy(dx: Float, dy: Float):
+		nb_set_f(id, "x", nb_get_f(id, "x") + dx)
+		nb_set_f(id, "y", nb_get_f(id, "y") + dy)
+	fn rotation() -> Float:
+		return nb_get_f(id, "rotation")
+	fn setRotation(degrees: Float):
+		nb_set_f(id, "rotation", degrees)
+	fn turnBy(degrees: Float):
+		nb_set_f(id, "rotation", nb_get_f(id, "rotation") + degrees)
+	fn scale() -> Float:
+		return nb_get_f(id, "scale")
+	fn setScale(value: Float):
+		nb_set_f(id, "scale", value)
+	fn visible() -> Bool:
+		return nb_get_b(id, "visible")
+	fn setVisible(value: Bool):
+		nb_set_b(id, "visible", value)
+	fn layer() -> Float:
+		return nb_get_f(id, "layer")
+	fn setLayer(value: Float):
+		nb_set_f(id, "layer", value)
+	fn touchable() -> Bool:
+		return nb_get_b(id, "touchable")
+	fn setTouchable(value: Bool):
+		nb_set_b(id, "touchable", value)
+
+class Sprite extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		sprites[id] = self
+	fn image() -> String:
+		return nb_get_s(id, "image")
+	fn setImage(file: String):
+		nb_set_s(id, "image", file)
+	fn flipX() -> Bool:
+		return nb_get_b(id, "flipX")
+	fn setFlipX(value: Bool):
+		nb_set_b(id, "flipX", value)
+
+class Shape extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		shapes[id] = self
+	fn color() -> String:
+		return nb_get_s(id, "color")
+	fn setColor(hex: String):
+		nb_set_s(id, "color", hex)
+	fn width() -> Float:
+		return nb_get_f(id, "width")
+	fn height() -> Float:
+		return nb_get_f(id, "height")
+	fn setSize(w: Float, h: Float):
+		nb_set_f(id, "width", w)
+		nb_set_f(id, "height", h)
+
+class Label extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		labels[id] = self
+	fn text() -> String:
+		return nb_get_s(id, "text")
+	fn setText(value):
+		nb_set_s(id, "text", str(value))
+	fn setColor(hex: String):
+		nb_set_s(id, "color", hex)
+	fn setFontSize(value: Float):
+		nb_set_f(id, "fontSize", value)
+
+class Button extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		buttons[id] = self
+		nb_set_b(id, "touchable", true)
+	fn text() -> String:
+		return nb_get_s(id, "text")
+	fn setText(value):
+		nb_set_s(id, "text", str(value))
+
+class Body extends Node2D:
+	var collided = BcNode()
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		bodies[id] = self
+	fn nbFire(name: String, a: Float, b: Float, other: Int):
+		if name == "collided":
+			collided.send(wrap(other))
+		else:
+			super.nbFire(name, a, b, other)
+	fn velocity() -> Vec2:
+		return Vec2(nb_get_f(id, "vx"), nb_get_f(id, "vy"))
+	fn setVelocity(vx: Float, vy: Float):
+		nb_set_f(id, "vx", vx)
+		nb_set_f(id, "vy", vy)
+	fn push(dvx: Float, dvy: Float):
+		nb_set_f(id, "vx", nb_get_f(id, "vx") + dvx)
+		nb_set_f(id, "vy", nb_get_f(id, "vy") + dvy)
+	fn setGravity(value: Float):
+		nb_set_f(id, "gravity", value)
+	fn onGround() -> Bool:
+		return nb_get_b(id, "onGround")
+
+class Camera extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		cameras[id] = self
+	fn setZoom(value: Float):
+		nb_set_f(id, "zoom", value)
+
+class Sound extends Node:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		sounds[id] = self
+	fn start():
+		nb_sound(nb_get_s(id, "file"))
+
+# ---- looking nodes up -----------------------------------------------------------------
+fn wrap(id: Int) -> Node:
+	var known = nodes.get(id)
+	if known != null:
+		return known
+	var t = nb_type(id)
+	match t:
+		case "Sprite":
+			return Sprite(id)
+		case "Shape":
+			return Shape(id)
+		case "Label":
+			return Label(id)
+		case "Button":
+			return Button(id)
+		case "Body":
+			return Body(id)
+		case "Camera":
+			return Camera(id)
+		case "Sound":
+			return Sound(id)
+		case "Node2D":
+			return Node2D(id)
+		default:
+			return Node(id)
+
+fn nodeAt(from: Int, path: String) -> Node:
+	var found = nb_find(from, path)
+	if found == 0:
+		throw f"no node at '{path}'"
+	return wrap(found)
+
+fn nodesTagged(label: String) -> List[Node]:
+	var out: List[Node] = []
+	for i in 1..nb_tagged_count(label):
+		out.add(wrap(nb_tagged_at(label, i)))
+	return out
+
+fn spawn(scene: String, parent: Node) -> Node:
+	var made = nb_spawn(scene, parent.id)
+	if made == 0:
+		throw f"cannot spawn '{scene}'"
+	return wrap(made)
+
+fn asNode2D(n: Node) -> Node2D:
+	var r = node2ds.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Node2D"
+	return r
+fn asSprite(n: Node) -> Sprite:
+	var r = sprites.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Sprite"
+	return r
+fn asShape(n: Node) -> Shape:
+	var r = shapes.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Shape"
+	return r
+fn asLabel(n: Node) -> Label:
+	var r = labels.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Label"
+	return r
+fn asButton(n: Node) -> Button:
+	var r = buttons.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Button"
+	return r
+fn asBody(n: Node) -> Body:
+	var r = bodies.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Body"
+	return r
+fn asCamera(n: Node) -> Camera:
+	var r = cameras.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Camera"
+	return r
+fn asSound(n: Node) -> Sound:
+	var r = sounds.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a Sound"
+	return r
+
+# ---- entry points. The generated game file re-exports these with bare names (snc mangles exports of imported modules) ----
+fn nbReady(id: Int):
+	wrap(id).onReady()
+
+fn nbFrame(id: Int, delta: Float):
+	var n = nodes.get(id)
+	if n != null:
+		n.onFrame(delta)
+
+fn nbTick(id: Int, rate: Int, delta: Float):
+	var n = nodes.get(id)
+	if n != null:
+		n.nbTickDispatch(rate, delta)
+
+fn nbEvery(id: Int, ms: Int, delta: Float):
+	var n = nodes.get(id)
+	if n != null:
+		n.nbEveryDispatch(ms, delta)
+
+fn nbFire(id: Int, name: String, a: Float, b: Float, other: Int):
+	wrap(id).nbFire(name, a, b, other)
+
+# the node is being freed: run its hook, send `freed`, forget it
+fn nbFreed(id: Int):
+	var n = nodes.get(id)
+	if n != null:
+		n.onFree()
+		n.freed.send()
+		nodes.remove(id)
+		node2ds.remove(id)
+		sprites.remove(id)
+		shapes.remove(id)
+		labels.remove(id)
+		buttons.remove(id)
+		bodies.remove(id)
+		cameras.remove(id)
+		sounds.remove(id)

@@ -1,0 +1,10 @@
+init=1
+[engine] tag Coin coin
+err=[]
+[engine] hero vy=0
+[engine] hero vy=-640
+[engine] hero vy=-1280
+[engine] Score.text = Score 10
+[engine] free Coin
+[log] still playing, score 10
+err=[]

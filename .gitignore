@@ -1,0 +1,9 @@
+build/
+.gradle/
+*.apk
+local.properties
+.idea/
+*.so
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
