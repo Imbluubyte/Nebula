@@ -16,10 +16,13 @@ interface ScriptHost {
     fun takeError(): String?
 }
 
+/** Actions come from the keyboard (`keys`) and from on-screen Buttons that have an `action` (`virtual`). */
 class Input {
-    val down = HashSet<String>()
-    val touches = ArrayList<Pair<Double, Double>>()
-    fun axis(neg: String, pos: String): Double = (if (pos in down) 1.0 else 0.0) - (if (neg in down) 1.0 else 0.0)
+    val keys = HashSet<String>()
+    val virtual = HashSet<String>()
+    val touches = ArrayList<Pair<Double, Double>>()      // game coordinates
+    fun isDown(action: String) = action in keys || action in virtual
+    fun axis(neg: String, pos: String): Double = (if (isDown(pos)) 1.0 else 0.0) - (if (isDown(neg)) 1.0 else 0.0)
 }
 
 /**
@@ -32,6 +35,7 @@ class Engine(
     var host: ScriptHost?,
     private val logSink: (String) -> Unit = { println(it) },
     private val mapError: (String) -> String = { it },
+    private val soundSink: (String) -> Unit = { },
 ) {
     val tree = SceneTree()
     val input = Input()
@@ -54,6 +58,7 @@ class Engine(
     private var pendingScene: String? = null
 
     fun log(msg: String) = logSink(msg)
+    fun playSound(file: String) = soundSink(file)
 
     // ------------------------------------------------------------ loading
     fun loadScene(path: String): Boolean {
@@ -185,6 +190,19 @@ class Engine(
         return (if (w > 0) w else 64.0) * n.f("scale").let { if (it == 0.0) 1.0 else it } to (if (h > 0) h else 64.0) * n.f("scale").let { if (it == 0.0) 1.0 else it }
     }
 
+    /** Fingers currently on the screen (game coordinates): refreshes touches and which on-screen buttons are held. */
+    fun setPointers(points: List<Pair<Double, Double>>) {
+        input.touches.clear(); input.touches.addAll(points)
+        input.virtual.clear()
+        if (points.isEmpty()) return
+        for (n in tree.all()) {
+            if (n.type != "Button" || !n.b("visible")) continue
+            val action = n.s("action"); if (action.isEmpty()) continue
+            val (px, py) = worldPos(n); val w = n.f("width"); val h = n.f("height")
+            if (points.any { Math.abs(it.first - px) <= w / 2 && Math.abs(it.second - py) <= h / 2 }) input.virtual.add(action)
+        }
+    }
+
     /** A tap at world coordinates: the topmost visible touchable node under it gets `tapped`. */
     fun tap(wx: Double, wy: Double): Boolean {
         val hit = tree.all().filter { it.b("touchable") && it.b("visible") }.sortedByDescending { it.f("layer") }.firstOrNull {
@@ -273,4 +291,9 @@ class Engine(
     fun apiTaggedCount(tag: String) = tree.tagged(tag).size.toLong()
     fun apiTaggedAt(tag: String, i: Long) = tree.tagged(tag).getOrNull((i - 1).toInt())?.id ?: 0
     fun apiGoto(scene: String) { pendingScene = scene }
+    fun apiDown(action: String) = input.isDown(action)
+    fun apiAxis(neg: String, pos: String) = input.axis(neg, pos)
+    fun apiTouchCount() = input.touches.size.toLong()
+    fun apiTouchX(i: Long) = input.touches.getOrNull((i - 1).toInt())?.first ?: 0.0
+    fun apiTouchY(i: Long) = input.touches.getOrNull((i - 1).toInt())?.second ?: 0.0
 }

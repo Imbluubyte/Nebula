@@ -63,7 +63,9 @@ class BuildResult(val ok: Boolean, val messages: List<String>, val lowered: Lowe
 
 /** scripts (.nbs) -> game.sn -> libscripts.so. The compiler (`snc`) and a C compiler must be installed. */
 class Builder(private val project: Project, private val runner: CommandRunner, private val apiDir: File,
-              private val snc: String = "snc", private val env: Map<String, String> = emptyMap()) {
+              private val snc: String = "snc", private val env: Map<String, String> = emptyMap(),
+              /** Command that turns build/game.sn into build/libscripts.so (Termux wraps it so output is not built on shared storage). */
+              private val command: (apiDir: File) -> List<String> = { api -> listOf(snc, "build", "game.sn", "--lib", "-I", api.absolutePath, "-o", "libscripts.so") }) {
 
     /** Only the transpile step (fast, no compiler needed): used for live diagnostics in the editor. */
     fun lower(): Lowered = Transpiler.lower(project.scriptSources())
@@ -74,9 +76,10 @@ class Builder(private val project: Project, private val runner: CommandRunner, p
         val out = project.buildDir; out.mkdirs()
         File(out, "game.sn").writeText(lowered.source)
         File(out, "scripts.meta").writeText(MetaFile.write(lowered.metas))
-        val (code, text) = try { runner.run(listOf(snc, "build", "game.sn", "--lib", "-I", apiDir.absolutePath, "-o", "libscripts.so"), out, env) }
+        val (code, text) = try { runner.run(command(apiDir), out, env) }
                            catch (e: Exception) { return BuildResult(false, listOf("cannot run '$snc': ${e.message}. Install SuperNova (snc) and clang."), lowered) }
         if (code != 0) return BuildResult(false, lowered.remap(text).lines().filter { it.isNotBlank() }, lowered)
+        if (!File(out, "libscripts.so").isFile) return BuildResult(false, listOf("the compiler finished but libscripts.so is missing", text.trim()), lowered)
         return BuildResult(true, listOf("built ${lowered.metas.size} script(s)"), lowered)
     }
 }

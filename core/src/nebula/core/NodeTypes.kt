@@ -31,7 +31,7 @@ object NodeTypes {
         NodeType("Shape", "Node2D", listOf(s("shape", "rect", "shape"), f("width", 64.0), f("height", 64.0), s("color", "#4FC3F7", "color")), icon = "R"),
         NodeType("Label", "Node2D", listOf(s("text", "Label"), f("fontSize", 24.0), s("color", "#FFFFFF", "color")), icon = "T"),
         NodeType("Button", "Node2D", listOf(s("text", "Button"), f("width", 160.0), f("height", 64.0),
-            f("fontSize", 24.0), s("color", "#3949AB", "color")), icon = "B"),
+            f("fontSize", 24.0), s("color", "#3949AB", "color"), s("action", "", "action")), icon = "B"),
         NodeType("Body", "Node2D", listOf(
             f("vx", 0.0), f("vy", 0.0), f("gravity", 0.0), f("width", 32.0), f("height", 32.0),
             b("solid", false), b("static", false), f("bounce", 0.0), b("onGround", false), s("color", "", "color")),

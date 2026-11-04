@@ -107,6 +107,24 @@ fun main(args: Array<String>) {
     check("onTick(30) = 60 calls / 2s", h2.calls.count { it.endsWith(" 30") && it.startsWith("tick") } == 60, h2.calls.count { it.startsWith("tick") }.toString())
     check("onTick(60) = 120 calls / 2s", h2.calls.count { it.endsWith(" 60") && it.startsWith("tick") } in 119..120)
 
+    // --- scene editor
+    val ed = SceneEditor { proj.readText(it) }
+    ed.load("scenes/main.nscn", proj.readText("scenes/main.nscn")!!)
+    val before = ed.toText()
+    check("editor load/save is stable", SceneFile.write(SceneFile.parse(before)) == before)
+    val world = ed.tree.root!!
+    val added = ed.addNode(world, "Sprite", "Ship")
+    check("add node", world.child("Ship") === added)
+    ed.rename(added, "Ship One!"); check("rename sanitises", added.name == "Ship_One_")
+    val dup = ed.duplicate(added)!!; check("duplicate", world.child("Ship_One_2") === dup)
+    check("indent/outdent", ed.indent(dup) && dup.parent === added && ed.outdent(dup) && dup.parent === world)
+    check("cannot reparent into own subtree", !ed.reparent(world, added))
+    check("undo restores", (1..5).all { ed.undo() } && ed.toText() == before)
+    check("redo", ed.redo() && ed.tree.root!!.children.any { it.name == "Ship" })
+    ed.setProp(ed.tree.root!!.child("Hero")!!, "x", 321.0)
+    check("prop edit survives roundtrip", SceneFile.parse(ed.toText()).root.children.first { it.name == "Hero" }.props["x"] == 321.0)
+    check("delete root refused", !ed.delete(ed.tree.root!!))
+
     println(if (failures == 0) "\nALL PASSED" else "\n$failures FAILED")
     System.exit(if (failures == 0) 0 else 1)
 }

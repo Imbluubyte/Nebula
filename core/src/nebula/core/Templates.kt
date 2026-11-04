@@ -36,18 +36,21 @@ node World Node2D
 		text = "Score 0"
 		fontSize = 36
 	node Left Button
+		action = "left"
 		x = 120
 		y = 640
 		text = "<"
 		width = 120
 		height = 96
 	node Right Button
+		action = "right"
 		x = 270
 		y = 640
 		text = ">"
 		width = 120
 		height = 96
 	node Jump Button
+		action = "jump"
 		x = 1160
 		y = 640
 		text = "Jump"
