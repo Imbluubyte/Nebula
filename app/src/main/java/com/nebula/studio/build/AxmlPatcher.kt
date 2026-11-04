@@ -9,7 +9,7 @@ import java.nio.ByteOrder
  * Only the string pool is rebuilt; every other chunk is copied untouched, and string indexes keep their order.
  */
 object AxmlPatcher {
-    fun patch(data: ByteArray, replaceExact: Map<String, String>): ByteArray {
+    fun patch(data: ByteArray, replaceExact: Map<String, String>, fromPackage: String? = null, toPackage: String? = null): ByteArray {
         val b = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
         require(b.getShort(0).toInt() == 0x0003) { "not a binary XML file" }
         val sp = 8
@@ -35,7 +35,15 @@ object AxmlPatcher {
                 strings.add(String(data, p, l * 2, Charsets.UTF_16LE))
             }
         }
-        for (i in strings.indices) replaceExact[strings[i]]?.let { strings[i] = it }
+        for (i in strings.indices) {
+            val cur = strings[i]
+            val exact = replaceExact[cur]
+            if (exact != null) strings[i] = exact
+            // provider authorities and similar ("<package>.androidx-startup"): package-derived names start with a lowercase
+            // letter after the dot, class names ("<package>.MainActivity") with an uppercase one and must stay.
+            else if (fromPackage != null && toPackage != null && cur.startsWith("$fromPackage.") && cur.length > fromPackage.length + 1 &&
+                cur[fromPackage.length + 1].isLowerCase()) strings[i] = toPackage + cur.substring(fromPackage.length)
+        }
 
         val body = ByteArrayOutputStream(); val offsets = IntArray(count)
         for (i in 0 until count) {

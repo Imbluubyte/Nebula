@@ -35,7 +35,7 @@ object ApkExporter {
                         data = AxmlPatcher.patch(data, mapOf(
                             BASE_PACKAGE to opt.packageId,
                             "$BASE_PACKAGE.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" to "${opt.packageId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
-                            "Nebula" to opt.label))
+                            "Nebula" to opt.label), BASE_PACKAGE, opt.packageId)
                     }
                     zip.add(e.name, data, store = e.name == "resources.arsc")
                 }

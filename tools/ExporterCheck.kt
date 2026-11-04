@@ -14,7 +14,7 @@ fun main(args: Array<String>) {
             if (e.name == "AndroidManifest.xml") data = AxmlPatcher.patch(data, mapOf(
                 "com.nebula.studio" to "com.example.testgame",
                 "com.nebula.studio.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" to "com.example.testgame.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
-                "Nebula" to "Test Game Label"))
+                "Nebula" to "Test Game Label"), "com.nebula.studio", "com.example.testgame")
             zip.add(e.name, data, store = e.name == "resources.arsc")
         }
     }

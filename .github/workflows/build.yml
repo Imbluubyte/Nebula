@@ -30,6 +30,11 @@ jobs:
           "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -E "^package:|application-label:|uses-permission: name='com.example"
           "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -q "package: name='com.example.testgame'"
           "$BT/aapt2" dump badging "$RUNNER_TEMP/patched.apk" | grep -q "application-label:'Test Game Label'"
+          # nothing derived from the editor's package id may remain (provider authorities clash on install); only the class name is allowed
+          "$BT/aapt2" dump xmltree --file AndroidManifest.xml "$RUNNER_TEMP/patched.apk" > "$RUNNER_TEMP/manifest.txt"
+          grep -o 'com\.nebula\.studio[^"]*' "$RUNNER_TEMP/manifest.txt" | sort -u
+          ! grep -o 'com\.nebula\.studio[^" ]*' "$RUNNER_TEMP/manifest.txt" | grep -v '^com\.nebula\.studio\.MainActivity$'
+          grep -q 'authorities.*com.example.testgame.androidx-startup' "$RUNNER_TEMP/manifest.txt" && echo "provider authority patched"
           "$BT/zipalign" -c 4 "$RUNNER_TEMP/patched.apk" && echo "zip alignment OK"
       - uses: actions/upload-artifact@v4
         with:
