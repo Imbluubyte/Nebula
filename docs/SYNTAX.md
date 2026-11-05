@@ -143,13 +143,14 @@ Shape: `color() setColor("#RRGGBB") width() height() setSize(w, h)`.
 Label: `text() setText(x) setColor(hex) setFontSize(n)`.
 Button: `text() setText(x)`.
 Body: `velocity() setVelocity(vx, vy) push(dvx, dvy) setGravity(g) onGround()`.
-Camera: `setZoom(z)`.
+Camera: `setZoom(z) zoom() followNode(node) followTag(tag) stopFollowing() isFollowing() setSmoothing(seconds) smoothing() setFollowAxes(horizontal, vertical) setOffset(dx, dy) setLimits(left, top, right, bottom) clearLimits() snapToTarget()`.
+`smoothing` is a time constant in seconds (0 = locked on). `target` is a node path or `#tag`. While `follow` is on the engine moves the Camera node. Node2D: `setFixed(b) isFixed()`; a `fixed` node (and its children) is placed on the screen and ignores the camera.
 
 ## Properties in scenes (`.nscn`) and the inspector
 
 | Node | Properties |
 | --- | --- |
-| Node2D | `x y rotation scale layer visible touchable` |
+| Node2D | `x y rotation scale layer visible touchable fixed` |
 | Sprite | `image flipX width height` and for sheets: `hframes vframes frame`; for animation: `animations animation playing speed` |
 | Shape | `shape (rect or circle) width height color` |
 | Label | `text fontSize color` |
@@ -157,7 +158,7 @@ Camera: `setZoom(z)`.
 | Body | `vx vy gravity width height solid static bounce color` |
 | SpawnableBody | everything of Body, plus `lifetime health maxHealth damage` |
 | TileMap | `image tileWidth tileHeight hframes vframes columns rows solid solidTiles tiles` |
-| Camera | `zoom` |
+| Camera | `zoom follow target followX followY smoothing offsetX offsetY limits limitLeft limitTop limitRight limitBottom` |
 | Sound | `file volume pitch loop autoplay` |
 
 `hframes` and `vframes` cut a Sprite's image into a grid so `frame` picks one cell without an animation file.

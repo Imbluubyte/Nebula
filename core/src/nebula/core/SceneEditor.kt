@@ -65,7 +65,9 @@ class SceneEditor(private val readFile: (String) -> String?) {
 
     // ---- operations (each is one undo step)
     fun addNode(parent: SceneNode, type: String, name: String = type): SceneNode = edit {
-        val n = tree.create(type, name); tree.add(parent, n); n
+        val n = tree.create(type, name); tree.add(parent, n)
+        if (type == "Button") n.props["fixed"] = true      // on-screen buttons stay on the screen when a camera moves
+        n
     }
 
     fun addInstance(parent: SceneNode, scenePath: String, name: String): SceneNode? = edit {

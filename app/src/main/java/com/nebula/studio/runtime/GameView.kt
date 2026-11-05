@@ -63,15 +63,11 @@ fun GameView(engine: Engine, images: ImageCache, gameW: Int, gameH: Int, modifie
         }
     }
 
+    /** A touch position in pixels to a spot on the game screen (0..gameW x 0..gameH). The engine turns it into a world position through the camera. */
     fun toGame(p: Offset): Pair<Double, Double> {
         val k = minOf(size.width / gameW.toFloat(), size.height / gameH.toFloat())
         val ox = (size.width - gameW * k) / 2f; val oy = (size.height - gameH * k) / 2f
-        val gx = (p.x - ox) / k; val gy = (p.y - oy) / k
-        // camera: game units -> world
-        val cam = engine.tree.all().firstOrNull { it.type == "Camera" }
-        val zoom = cam?.f("zoom")?.takeIf { it > 0 } ?: 1.0
-        val cx = cam?.let { engine.worldPos(it).first } ?: (gameW / 2.0); val cy = cam?.let { engine.worldPos(it).second } ?: (gameH / 2.0)
-        return (cx + (gx - gameW / 2.0) / zoom) to (cy + (gy - gameH / 2.0) / zoom)
+        return ((p.x - ox) / k).toDouble() to ((p.y - oy) / k).toDouble()
     }
 
     Box(modifier.fillMaxSize().background(Color.Black).onSizeChanged { size = it }
@@ -101,17 +97,17 @@ fun GameView(engine: Engine, images: ImageCache, gameW: Int, gameH: Int, modifie
             frame.hashCode()   // redraw every frame
             val k = minOf(this.size.width / gameW, this.size.height / gameH)
             val ox = (this.size.width - gameW * k) / 2f; val oy = (this.size.height - gameH * k) / 2f
-            val cam = engine.tree.all().firstOrNull { it.type == "Camera" }
-            val zoom = (cam?.f("zoom")?.takeIf { it > 0 } ?: 1.0).toFloat()
-            val camX = cam?.let { engine.worldPos(it).first.toFloat() } ?: (gameW / 2f)
-            val camY = cam?.let { engine.worldPos(it).second.toFloat() } ?: (gameH / 2f)
+            val zoom = engine.camZoom.toFloat(); val camX = engine.camX.toFloat(); val camY = engine.camY.toFloat()   // the engine moves the camera (follow, smoothing, limits)
+            val items = Renderer.collect(engine.tree)
             clipRect(ox, oy, ox + gameW * k, oy + gameH * k) {
                 drawRect(Color(0xFF101820), Offset(ox, oy), Size(gameW * k, gameH * k))
                 withTransform({
                     translate(ox + gameW * k / 2f, oy + gameH * k / 2f)
                     scale(k * zoom, k * zoom, Offset.Zero)
                     translate(-camX, -camY)
-                }) { for (item in Renderer.collect(engine.tree)) drawNode(item, images, false) }
+                }) { for (item in items) if (!item.node.isFixed()) drawNode(item, images, false) }
+                // fixed nodes (score, on-screen buttons) sit on the screen and ignore the camera; they are drawn last, on top
+                withTransform({ translate(ox, oy); scale(k, k, Offset.Zero) }) { for (item in items) if (item.node.isFixed()) drawNode(item, images, false) }
             }
         }
         if (showFps) BasicText("$fps FPS",

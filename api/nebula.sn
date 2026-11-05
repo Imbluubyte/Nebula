@@ -292,6 +292,11 @@ class Node2D extends Node:
 		return nb_get_b(id, "touchable")
 	fn setTouchable(value: Bool):
 		nb_set_b(id, "touchable", value)
+	# fixed: placed on the screen and ignoring the camera (a score label, an on-screen button)
+	fn isFixed() -> Bool:
+		return nb_get_b(id, "fixed")
+	fn setFixed(value: Bool):
+		nb_set_b(id, "fixed", value)
 
 class Sprite extends Node2D:
 	var animationFinished = Bc0()
@@ -523,8 +528,47 @@ class Camera extends Node2D:
 	fn onCreation(id: Int):
 		super.onCreation(id)
 		cameras[id] = self
+	# zoom: 1 = normal, 2 = twice as close, 0.5 = twice as far
+	fn zoom() -> Float:
+		return nb_get_f(id, "zoom")
 	fn setZoom(value: Float):
 		nb_set_f(id, "zoom", value)
+	# stationary or following: followNode / followTag turn following on, stopFollowing turns it off (the camera stays where it is)
+	fn followNode(target: Node):
+		nb_set_s(id, "target", nb_get_s(target.id, "path"))
+		nb_set_b(id, "follow", true)
+	fn followTag(label: String):
+		nb_set_s(id, "target", f"#{label}")
+		nb_set_b(id, "follow", true)
+	fn stopFollowing():
+		nb_set_b(id, "follow", false)
+	fn isFollowing() -> Bool:
+		return nb_get_b(id, "follow")
+	# smoothing: seconds to close about 63% of the gap to the target. 0 = locked on, 0.15 = snappy, 0.5 = floaty
+	fn setSmoothing(seconds: Float):
+		nb_set_f(id, "smoothing", seconds)
+	fn smoothing() -> Float:
+		return nb_get_f(id, "smoothing")
+	# which directions it moves in: setFollowAxes(true, false) only follows sideways, (true, true) follows everywhere
+	fn setFollowAxes(horizontal: Bool, vertical: Bool):
+		nb_set_b(id, "followX", horizontal)
+		nb_set_b(id, "followY", vertical)
+	# shifts the view away from the target, e.g. setOffset(0.0, -80.0) shows more of what is above the player
+	fn setOffset(dx: Float, dy: Float):
+		nb_set_f(id, "offsetX", dx)
+		nb_set_f(id, "offsetY", dy)
+	# keeps the whole view inside a rectangle (the level)
+	fn setLimits(left: Float, top: Float, right: Float, bottom: Float):
+		nb_set_f(id, "limitLeft", left)
+		nb_set_f(id, "limitTop", top)
+		nb_set_f(id, "limitRight", right)
+		nb_set_f(id, "limitBottom", bottom)
+		nb_set_b(id, "limits", true)
+	fn clearLimits():
+		nb_set_b(id, "limits", false)
+	# jump straight to the target this frame (after teleporting the player, say)
+	fn snapToTarget():
+		nb_set_b(id, "_snap", true)
 
 class Sound extends Node:
 	fn onCreation(id: Int):

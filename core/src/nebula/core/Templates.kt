@@ -27,15 +27,47 @@ object Templates {
 scene "Main"
 node World Node2D
 	node Ground Body
-		x = 640
+		x = 1280
 		y = 680
-		width = 1280
+		width = 2560
 		height = 40
 		solid = true
 		static = true
 		color = "#37474F"
-	node Platform Body
+	node WallLeft Body
+		x = 20
+		y = 340
+		width = 40
+		height = 680
+		solid = true
+		static = true
+		color = "#263238"
+	node WallRight Body
+		x = 2540
+		y = 340
+		width = 40
+		height = 680
+		solid = true
+		static = true
+		color = "#263238"
+	node Platform1 Body
 		x = 900
+		y = 560
+		width = 240
+		height = 24
+		solid = true
+		static = true
+		color = "#546E7A"
+	node Platform2 Body
+		x = 1500
+		y = 460
+		width = 240
+		height = 24
+		solid = true
+		static = true
+		color = "#546E7A"
+	node Platform3 Body
+		x = 2100
 		y = 560
 		width = 240
 		height = 24
@@ -50,8 +82,19 @@ node World Node2D
 		gravity = 1400
 		solid = true
 		color = "#FFB300"
+	node Camera Camera
+		x = 640
+		y = 360
+		follow = true
+		target = "#player"
+		followY = false
+		smoothing = 0.15
+		limits = true
+		limitRight = 2560
+		limitBottom = 720
 	node Left Button
 		action = "left"
+		fixed = true
 		x = 120
 		y = 640
 		text = "<"
@@ -59,6 +102,7 @@ node World Node2D
 		height = 96
 	node Right Button
 		action = "right"
+		fixed = true
 		x = 270
 		y = 640
 		text = ">"
@@ -66,6 +110,7 @@ node World Node2D
 		height = 96
 	node Jump Button
 		action = "jump"
+		fixed = true
 		x = 1160
 		y = 640
 		text = "Jump"
@@ -78,6 +123,10 @@ node World Node2D
 # This script is attached to the Player node in scenes/main.nscn.
 # Controls: arrow keys or A / D to run, Space to jump. On a touch screen the on-screen buttons do the same,
 # because each Button node has an "action" (left, right, jump) that isDown() and axis() understand.
+#
+# The level is wider than the screen. The Camera node follows the Player sideways only (followY is off) and stays inside the level
+# (limits). Select the Camera to change its zoom, smoothing, or to make it follow up and down as well. The three buttons have "fixed"
+# turned on, which keeps them on the screen while the camera moves.
 #
 # Things you can tweak without touching any code:
 #   - the numbers under "tweak" below (they also show up in the Inspector when the Player is selected)
@@ -109,52 +158,70 @@ script Player of Body:
 scene "Main"
 node World Node2D
 	node Floor Shape
-		x = 640
-		y = 360
-		width = 1280
-		height = 720
+		x = 1280
+		y = 720
+		width = 2560
+		height = 1440
 		color = "#4E6E3A"
 	node WallTop Body
-		x = 640
+		x = 1280
 		y = 20
-		width = 1280
+		width = 2560
 		height = 40
 		solid = true
 		static = true
 		color = "#37474F"
 	node WallBottom Body
-		x = 640
-		y = 700
-		width = 1280
+		x = 1280
+		y = 1420
+		width = 2560
 		height = 40
 		solid = true
 		static = true
 		color = "#37474F"
 	node WallLeft Body
 		x = 20
-		y = 360
+		y = 720
 		width = 40
-		height = 720
+		height = 1440
 		solid = true
 		static = true
 		color = "#37474F"
 	node WallRight Body
-		x = 1260
-		y = 360
+		x = 2540
+		y = 720
 		width = 40
-		height = 720
+		height = 1440
 		solid = true
 		static = true
 		color = "#37474F"
+	node Rock Body
+		x = 1000
+		y = 560
+		width = 120
+		height = 120
+		solid = true
+		static = true
+		color = "#607D8B"
 	node Player Body script "scripts/player.nbs" tags "player"
-		x = 640
-		y = 360
+		x = 1280
+		y = 720
 		width = 40
 		height = 40
 		solid = true
 		color = "#FFB300"
+	node Camera Camera
+		x = 1280
+		y = 720
+		follow = true
+		target = "#player"
+		smoothing = 0.12
+		limits = true
+		limitRight = 2560
+		limitBottom = 1440
 	node Left Button
 		action = "left"
+		fixed = true
 		x = 100
 		y = 560
 		text = "<"
@@ -162,6 +229,7 @@ node World Node2D
 		height = 90
 	node Right Button
 		action = "right"
+		fixed = true
 		x = 300
 		y = 560
 		text = ">"
@@ -169,6 +237,7 @@ node World Node2D
 		height = 90
 	node Up Button
 		action = "up"
+		fixed = true
 		x = 200
 		y = 470
 		text = "^"
@@ -176,6 +245,7 @@ node World Node2D
 		height = 90
 	node Down Button
 		action = "down"
+		fixed = true
 		x = 200
 		y = 650
 		text = "v"
@@ -190,7 +260,9 @@ node World Node2D
 # because each Button node has an "action" (left, right, up, down) that axis() understands.
 #
 # The Player has no gravity (see its Inspector), so it only moves when this script tells it to.
-# The four Wall nodes are solid and static, so the player cannot walk through them.
+# The four Wall nodes and the Rock are solid and static, so the player cannot walk through them.
+# The room is bigger than the screen: the Camera node follows the Player in every direction and stays inside the room (limits).
+# Select the Camera in the scene tree to change its zoom or smoothing. The four buttons have "fixed" turned on, so they stay on the screen.
 #
 # Things you can tweak without touching any code:
 #   - the number under "tweak" below (it also shows up in the Inspector when the Player is selected)

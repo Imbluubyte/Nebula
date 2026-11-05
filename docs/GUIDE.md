@@ -47,7 +47,7 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Type | Use | Main properties |
 | --- | --- | --- |
 | Node | plain container | |
-| Node2D | position holder / group | x, y, rotation (degrees), scale, layer, visible, touchable |
+| Node2D | position holder / group | x, y, rotation (degrees), scale, layer, visible, touchable, fixed |
 | Sprite | picture or animated sprite sheet | image, flipX, width, height, hframes, vframes, frame, animations, animation, playing, speed |
 | Shape | rectangle or circle | shape, width, height, color |
 | Label | text | text, fontSize, color |
@@ -55,13 +55,50 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
 | SpawnableBody | a Body made to be spawned many times (bullets, enemies, pickups) | everything a Body has, plus lifetime, health, maxHealth, damage |
 | TileMap | a grid of tiles cut from one picture (floors, walls, levels) | image, tileWidth, tileHeight, hframes, vframes, columns, rows, solid, solidTiles, tiles |
-| Camera | view centre | zoom |
+| Camera | the view: zoom, follow a node, limits | zoom, follow, target, followX, followY, smoothing, offsetX, offsetY, limits, limitLeft, limitTop, limitRight, limitBottom |
 | Sound | sound player | file, volume, pitch, loop, autoplay |
 
 Positions are in game units (project size, default 1280x720, y grows downward) and add up through parents.
 A **Button with an `action`** (`left`, `right`, `up`, `down`, `jump`, `action`) counts as that action while held: scripts read it with `isDown("left")` /
 `axis("left", "right")`. The keyboard (arrows/WASD, space, Z) feeds the same actions.
 **Body**: gravity pulls it down; a body that is `solid` and `static` is ground that other bodies stand on (`onGround()` becomes true).
+
+### Camera: zoom, following, smoothing, limits
+
+Add a **Camera** node anywhere in the scene (a scene without one shows the game area as it is). What the player sees is the world around the camera's `x`, `y`, `zoom` times closer.
+
+| Property | What it does |
+| --- | --- |
+| `zoom` | 1 = normal, 2 = twice as close (things look twice as big), 0.5 = twice as far |
+| `follow` | **off**: the camera is stationary, it shows what is around its own `x`, `y`. **on**: it tracks its `target` |
+| `target` | what to follow: tap the button and pick a node, or a **#tag** (`#player` follows the first node tagged `player`; it keeps working if you rename the node) |
+| `followX`, `followY` | which directions it moves in. Platformer: `followX` on, `followY` off = only follows sideways, the height stays where you placed the camera. Both on = follows everywhere |
+| `smoothing` | how lazily it follows, in seconds: the time it takes to close about two thirds of the gap. `0` = locked to the target, `0.15` = snappy, `0.5` = floaty. Same feel at any frame rate |
+| `offsetX`, `offsetY` | shift the view away from the target, e.g. `offsetY = -80` shows more of what is above the player |
+| `limits` | keep the view inside `limitLeft` .. `limitRight` x `limitTop` .. `limitBottom` (the size of your level), so the camera never shows the empty space beyond it. A level smaller than the screen is centred |
+
+While following, the engine moves the Camera node itself, so `x()` / `y()` on the camera give what the view is looking at.
+
+**Fixed nodes.** Everything in a scene normally moves with the world. Turn on **`fixed`** on a node (and everything under it) to place it on the screen instead: a score Label, a health bar, on-screen Buttons.
+Fixed nodes ignore the camera completely (position, zoom) and are drawn on top; touch buttons and `tapped` use screen positions for them. New Buttons are fixed by default, and the presets have it on.
+`touches()` and `tapped(x, y)` of normal nodes are world positions, so aiming a bullet at a finger works with any camera.
+
+From a script, on a node of type Camera (or `@/World/Camera as Camera`):
+
+```
+script Rig of Camera:
+	fn onReady():
+		setZoom(1.5)
+		followTag("player")            # or followNode(@/World/Hero)
+		setSmoothing(0.3)
+		setFollowAxes(true, false)     # sideways only
+		setOffset(0.0, -60.0)
+		setLimits(0.0, 0.0, 3000.0, 800.0)
+```
+
+`setZoom(z) zoom()`, `followNode(node) followTag(tag) stopFollowing() isFollowing()`, `setSmoothing(s) smoothing()`, `setFollowAxes(horizontal, vertical)`, `setOffset(dx, dy)`,
+`setLimits(left, top, right, bottom) clearLimits()`, `snapToTarget()` (jump straight to the target this frame, e.g. after teleporting the player). Any node: `setFixed(b) isFixed()`.
+The platformer and top down presets each have a Camera that follows the player inside a level wider than the screen; select it to try the settings.
 
 ### TileMap: levels made of tiles
 
@@ -192,7 +229,8 @@ Buttons are touchable), `collided(other)` (Body), `freed` (every node). Handlers
 `nebula.nodesTagged("enemy")` for all tagged nodes; `Vec2(x, y)` with `plus minus times length normalized distanceTo`.
 Node2D: `x() y() position() setPosition(x,y) moveBy(dx,dy) rotation() setRotation(d) turnBy(d) setScale(s) setVisible(b) setLayer(n) setTouchable(b)`.
 Sprite: `setImage(file) setFlipX(b) animate("clip") stopAnimating() setAnimSpeed(x) setFrame(n)`. Sound: `start() stop() setVolume(v) setPitch(p) setLoop(b)`. Shape: `setColor("#RRGGBB") setSize(w,h)`. Label: `setText(x) setColor() setFontSize()`.
-Body: `velocity() setVelocity(vx,vy) push(dvx,dvy) setGravity(g) onGround()`. Camera: `setZoom(z)`.
+Body: `velocity() setVelocity(vx,vy) push(dvx,dvy) setGravity(g) onGround()`. Node2D also: `setFixed(b) isFixed()`.
+Camera: `setZoom(z) zoom() followNode(node) followTag(tag) stopFollowing() isFollowing() setSmoothing(s) smoothing() setFollowAxes(h, v) setOffset(dx, dy) setLimits(l, t, r, b) clearLimits() snapToTarget()`.
 TileMap: `tileAt(c, r) setTile(c, r, n) clearTile(c, r) fillTiles(n) columns() rows() tileWidth() tileHeight() setSolid(b) colAt(wx) rowAt(wy) tileAtPoint(wx, wy) cellCenter(c, r)`.
 SpawnableBody (a Body): `lifetime() setLifetime(s) age() health() maxHealth() setHealth(n) setMaxHealth(n) hurt(n) heal(n) die() isDead() damage() setDamage(n) dealDamage(other) launch(angle, speed) launchAt(node, speed) angleTo(x, y) chase(node, speed)`.
 Every script: `spawnBody(scene, parent, x, y) spawnBurst(scene, parent, x, y, count, speed) spawnRing(scene, parent, x, y, count, radius) countTagged("tag") nearest("tag", x, y)`.

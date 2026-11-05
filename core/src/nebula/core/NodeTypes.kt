@@ -26,7 +26,7 @@ object NodeTypes {
         NodeType("Node", null, emptyList(), listOf(BcDef("freed")), "N"),
         NodeType("Node2D", "Node", listOf(
             f("x", 0.0), f("y", 0.0), f("rotation", 0.0), f("scale", 1.0), f("layer", 0.0),
-            b("visible", true), b("touchable", false)), listOf(BcDef("tapped", listOf("Float", "Float"))), "+"),
+            b("visible", true), b("touchable", false), b("fixed", false)), listOf(BcDef("tapped", listOf("Float", "Float"))), "+"),
         NodeType("Sprite", "Node2D", listOf(s("image", "", "image"), b("flipX", false), f("width", 0.0), f("height", 0.0),
             f("hframes", 1.0), f("vframes", 1.0), f("frame", 1.0),
             s("animations", "", "animations"), s("animation", "", "animation"), b("playing", true), f("speed", 1.0)),
@@ -49,7 +49,13 @@ object NodeTypes {
             f("hframes", 1.0), f("vframes", 1.0), f("columns", 20.0), f("rows", 12.0),
             b("solid", true), s("solidTiles", "", "which tile numbers are solid, like 1, 2, 7 (empty = every painted tile)"), s("tiles", "", "tiles")),
             listOf(), "#"),
-        NodeType("Camera", "Node2D", listOf(f("zoom", 1.0)), icon = "C"),
+        // The view. Without `follow` it stays where it is placed (x, y is the world point at the centre of the screen). With `follow` it tracks `target`
+        // (a node path like /World/Player, or #tag for the first node with that tag): `smoothing` is how many seconds it takes to close about 63% of the
+        // gap (0 = locked on), followX / followY pick the axes it moves on, offsetX / offsetY shift the view away from the target, and `limits` keeps
+        // the view inside limitLeft..limitRight x limitTop..limitBottom. The engine moves the Camera node itself, so scripts can read its position.
+        NodeType("Camera", "Node2D", listOf(f("zoom", 1.0), b("follow", false), s("target", "", "target"), b("followX", true), b("followY", true),
+            f("smoothing", 0.15), f("offsetX", 0.0), f("offsetY", 0.0),
+            b("limits", false), f("limitLeft", 0.0), f("limitTop", 0.0), f("limitRight", 1280.0), f("limitBottom", 720.0)), icon = "C"),
         NodeType("Sound", "Node", listOf(s("file", "", "sound"), f("volume", 1.0), f("pitch", 1.0), b("loop", false), b("autoplay", false)), icon = "A"),
     )
 

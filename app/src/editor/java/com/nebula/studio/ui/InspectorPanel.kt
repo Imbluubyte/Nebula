@@ -73,7 +73,7 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
         }
         Kind.F -> Row(verticalAlignment = Alignment.CenterVertically) {
             Field(fmtNum(n.f(d.name)), { v -> v.toDoubleOrNull()?.let { x -> studio.change { it.setProp(n, d.name, x) } } }, Modifier.weight(1f), label = d.name, number = true)
-            val step = if (d.name == "rotation") 15.0 else if (d.name in listOf("scale", "zoom", "volume", "pitch", "speed")) 0.1 else if (d.name in listOf("frame", "hframes", "vframes", "columns", "rows", "health", "maxHealth", "damage")) 1.0 else 8.0
+            val step = if (d.name == "rotation") 15.0 else if (d.name in listOf("scale", "zoom", "volume", "pitch", "speed", "smoothing")) 0.1 else if (d.name in listOf("frame", "hframes", "vframes", "columns", "rows", "health", "maxHealth", "damage")) 1.0 else 8.0
             IconBtn(Icons.Default.Remove, "less", { studio.change { it.setProp(n, d.name, n.f(d.name) - step) } })
             IconBtn(Icons.Default.Add, "more", { studio.change { it.setProp(n, d.name, n.f(d.name) + step) } })
         }
@@ -114,6 +114,17 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
                         for (hex in swatches) Box(Modifier.size(28.dp).clip(CircleShape).background(Renderer.parseColor(hex, Color.White))
                             .clickable { studio.change { it.setProp(n, d.name, hex) } })
                     }
+                }
+                "target" -> {
+                    Text("${d.name} (what the camera follows)", color = C.dim, fontSize = 11.sp)
+                    TextBtn(n.s(d.name).ifEmpty { "choose a node or tag..." }, {
+                        val all = studio.tree?.all() ?: emptyList()
+                        val tags = all.flatMap { it.tags }.distinct().map { "#$it" }
+                        val paths = all.filter { it.id != n.id && NodeTypes.isA(it.type, "Node2D") }.map { it.path() }
+                        studio.modal = Modal.Pick("Camera target (a #tag keeps working when nodes are renamed)", listOf("(none)") + tags + paths) { picked ->
+                            studio.change { it.setProp(n, d.name, if (picked == "(none)") "" else picked) }
+                        }
+                    }, Modifier.fillMaxWidth())
                 }
                 "tiles" -> {
                     val painting = studio.paintPath == n.path()

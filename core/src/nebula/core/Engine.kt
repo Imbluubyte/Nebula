@@ -46,6 +46,11 @@ class Engine(
     val anims = AnimLibrary(readFile)
     var screenW = 1280.0
     var screenH = 720.0
+
+    /** The view the game is drawn with: the world point at the centre of the screen and the zoom. Updated every frame (see updateCamera). */
+    var camX = 640.0; private set
+    var camY = 360.0; private set
+    var camZoom = 1.0; private set
     var time = 0.0
         private set
     var sceneTitle = ""
@@ -77,6 +82,7 @@ class Engine(
         val root = build(def.root, null, created, 0) ?: return false
         tree.setRoot(root)
         start(created)
+        updateCamera(0.0, true)
         return true
     }
 
@@ -172,6 +178,7 @@ class Engine(
         serviceSounds()
         serviceSpawnables(dt)
         physics(dt)
+        updateCamera(dt, false)
         host?.pump(); check()
         flush()
     }
@@ -242,24 +249,74 @@ class Engine(
 
     /** Fingers currently on the screen (game coordinates): refreshes touches and which on-screen buttons are held. */
     fun setPointers(points: List<Pair<Double, Double>>) {
-        input.touches.clear(); input.touches.addAll(points)
+        val world = points.map { toWorld(it.first, it.second) }          // scripts' touches() are world positions
+        input.touches.clear(); input.touches.addAll(world)
         input.virtual.clear()
         if (points.isEmpty()) return
         for (n in tree.all()) {
             if (n.type != "Button" || !n.b("visible")) continue
             val action = n.s("action"); if (action.isEmpty()) continue
             val (px, py) = worldPos(n); val w = n.f("width"); val h = n.f("height")
-            if (points.any { Math.abs(it.first - px) <= w / 2 && Math.abs(it.second - py) <= h / 2 }) input.virtual.add(action)
+            val pts = if (n.isFixed()) points else world
+            if (pts.any { Math.abs(it.first - px) <= w / 2 && Math.abs(it.second - py) <= h / 2 }) input.virtual.add(action)
         }
     }
 
-    /** A tap at world coordinates: the topmost visible touchable node under it gets `tapped`. */
-    fun tap(wx: Double, wy: Double): Boolean {
+    /** A point on the screen (game units, 0..screenW x 0..screenH) to the world point under it, through the camera. */
+    fun toWorld(gx: Double, gy: Double): Pair<Double, Double> = (camX + (gx - screenW / 2) / camZoom) to (camY + (gy - screenH / 2) / camZoom)
+
+    private fun cameraTarget(cam: SceneNode): SceneNode? {
+        val t = cam.s("target").trim()
+        if (t.isEmpty()) return null
+        return if (t.startsWith("#")) tree.tagged(t.substring(1)).firstOrNull() else tree.find(cam, t)
+    }
+
+    /** Moves the view: follows the camera's target (smoothed, per axis, with offset), keeps it inside the limits, and writes the result back to the Camera node. */
+    private fun updateCamera(dt: Double, snap: Boolean) {
+        val cam = tree.all().firstOrNull { it.type == "Camera" }
+        if (cam == null) { camX = screenW / 2; camY = screenH / 2; camZoom = 1.0; return }
+        val zoom = cam.f("zoom").takeIf { it > 0 } ?: 1.0
+        var (wx, wy) = cam.worldPos()
+        val forceSnap = snap || cam.b("_snap")
+        if (cam.b("_snap")) cam.props["_snap"] = false
+        val follow = cam.b("follow")
+        if (follow) {
+            val target = cameraTarget(cam)
+            if (target != null) {
+                val (tx, ty) = target.worldPos()
+                val tau = cam.f("smoothing")
+                val k = if (forceSnap || tau <= 0.0) 1.0 else 1.0 - Math.exp(-dt / tau)
+                if (cam.b("followX")) wx += (tx + cam.f("offsetX") - wx) * k
+                if (cam.b("followY")) wy += (ty + cam.f("offsetY") - wy) * k
+            }
+        }
+        val limits = cam.b("limits")
+        if (limits) {
+            val hw = screenW / 2 / zoom; val hh = screenH / 2 / zoom
+            val l = cam.f("limitLeft"); val r = cam.f("limitRight"); val t = cam.f("limitTop"); val b = cam.f("limitBottom")
+            wx = if (r - l <= 2 * hw) (l + r) / 2 else wx.coerceIn(l + hw, r - hw)       // a level smaller than the screen is centred
+            wy = if (b - t <= 2 * hh) (t + b) / 2 else wy.coerceIn(t + hh, b - hh)
+        }
+        if (follow || limits) {
+            val (cx, cy) = cam.worldPos()
+            cam.props["x"] = cam.f("x") + (wx - cx); cam.props["y"] = cam.f("y") + (wy - cy)     // so the node's own position stays what the view really is
+        }
+        camX = wx; camY = wy; camZoom = zoom
+    }
+
+    /** A tap at a screen position (game units): the topmost visible touchable node under it gets `tapped` (fixed nodes are hit on the screen, the rest through the camera). */
+    fun tap(gx: Double, gy: Double): Boolean {
+        val (wx, wy) = toWorld(gx, gy)
+        var tx = wx; var ty = wy
         val hit = tree.all().filter { it.b("touchable") && it.b("visible") }.sortedByDescending { it.f("layer") }.firstOrNull {
             val (px, py) = worldPos(it); val (w, h) = sizeOf(it)
-            Math.abs(wx - px) <= w / 2 && Math.abs(wy - py) <= h / 2
+            val fixed = it.isFixed()
+            val x = if (fixed) gx else wx; val y = if (fixed) gy else wy
+            val inside = Math.abs(x - px) <= w / 2 && Math.abs(y - py) <= h / 2
+            if (inside) { tx = x; ty = y }
+            inside
         } ?: return false
-        host?.fire(hit.id, "tapped", wx, wy, 0); check()
+        host?.fire(hit.id, "tapped", tx, ty, 0); check()
         return true
     }
 
@@ -401,6 +458,7 @@ class Engine(
     private fun slot(n: SceneNode, prop: String): Any? =
         if (prop.startsWith("tweak:")) n.tweaks[prop.substring(6)]
         else if (prop == "name") n.name
+        else if (prop == "path") n.path()
         else if (prop.startsWith("tile:")) { if (n.type == "TileMap") tileCell(prop)?.let { TileGrid.of(n)[it.first, it.second] } else null }
         else n.props[prop]
     fun apiGetF(id: Long, prop: String): Double = (tree.get(id)?.let { slot(it, prop) } as? Number)?.toDouble() ?: 0.0

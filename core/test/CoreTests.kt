@@ -227,11 +227,11 @@ fun main(args: Array<String>) {
         check("top down loads", e.loadScene("scenes/main.nscn"))
         val player = e.tree.tagged("player").single()
         repeat(60) { e.update(1.0 / 60) }
-        check("top down player does not fall", Math.abs(player.f("y") - 360.0) < 0.5 && Math.abs(player.f("x") - 640.0) < 0.5)
+        check("top down player does not fall", Math.abs(player.f("y") - 720.0) < 0.5 && Math.abs(player.f("x") - 1280.0) < 0.5)
         for (dir in listOf(1.0 to 0.0, -1.0 to 0.0, 0.0 to 1.0, 0.0 to -1.0)) {
-            player.props["x"] = 640.0; player.props["y"] = 360.0
-            repeat(150) { player.props["vx"] = dir.first * 900.0; player.props["vy"] = dir.second * 900.0; e.update(1.0 / 60) }
-            check("top down walls stop the player (${dir.first},${dir.second})", player.f("x") in 39.0..1241.0 && player.f("y") in 39.0..681.0 && (player.f("x") !in 635.0..645.0 || player.f("y") !in 355.0..365.0), player.props.toString())
+            player.props["x"] = 1280.0; player.props["y"] = 1000.0
+            repeat(300) { player.props["vx"] = dir.first * 900.0; player.props["vy"] = dir.second * 900.0; e.update(1.0 / 60) }
+            check("top down walls stop the player (${dir.first},${dir.second})", player.f("x") in 59.0..2501.0 && player.f("y") in 59.0..1381.0 && (player.f("x") !in 1275.0..1285.0 || player.f("y") !in 995.0..1005.0), player.props.toString())
         }
     }
 
@@ -350,6 +350,92 @@ fun main(args: Array<String>) {
         check("TileMap API compiles with snc", r.ok, r.messages.joinToString("\n     "))
     }
 
+
+    // --- camera
+    run {
+        fun cam(scene: String): Engine {
+            val cp = Project.create(File(tmp, "cam-${scene.hashCode()}"), "Cam", preset = Preset.BLANK)
+            File(cp.dir, "scenes/main.nscn").writeText(scene)
+            return Engine({ cp.readText(it) }, emptyMap(), FakeHost(), { }).also { check("camera scene loads", it.loadScene("scenes/main.nscn")) }
+        }
+        fun near(a: Double, b: Double, eps: Double = 0.01) = Math.abs(a - b) <= eps
+        val bare = cam("scene \"C\"\nnode World Node2D\n")
+        check("no camera: screen centre is the view centre and points map one to one", near(bare.camX, 640.0) && near(bare.camY, 360.0) && bare.toWorld(100.0, 50.0).let { near(it.first, 100.0) && near(it.second, 50.0) })
+
+        val still = cam("scene \"C\"\nnode World Node2D\n\tnode Cam Camera\n\t\tx = 1000\n\t\ty = 500\n\t\tzoom = 2\n")
+        still.update(1.0 / 60)
+        check("static camera shows its own position and zoom", near(still.camX, 1000.0) && near(still.camY, 500.0) && near(still.camZoom, 2.0))
+        check("screen to world through zoom", still.toWorld(640.0, 360.0).let { near(it.first, 1000.0) && near(it.second, 500.0) } && still.toWorld(0.0, 0.0).let { near(it.first, 680.0) && near(it.second, 320.0) })
+
+        val base = "scene \"C\"\nnode World Node2D\n\tnode Cam Camera\n\t\tfollow = true\n\t\ttarget = \"/World/Hero\"\n\t\tsmoothing = 0\n%s\tnode Hero Body tags \"hero\"\n\t\tstatic = true\n\t\tx = 300\n\t\ty = 200\n"
+        val f = cam(base.format(""))
+        val hero = f.tree.find(f.tree.root!!, "Hero")!!; val camNode = f.tree.find(f.tree.root!!, "Cam")!!
+        check("follow snaps to the target when the scene starts", near(f.camX, 300.0) && near(f.camY, 200.0))
+        hero.props["x"] = 500.0; hero.props["y"] = 100.0; f.update(1.0 / 60)
+        check("smoothing 0 locks on to the target", near(f.camX, 500.0) && near(f.camY, 100.0))
+        check("the Camera node itself moves (scripts can read it)", near(camNode.f("x"), 500.0) && near(camNode.f("y"), 100.0))
+
+        val hOnly = cam(base.format("\t\tfollowY = false\n"))
+        val h2 = hOnly.tree.find(hOnly.tree.root!!, "Hero")!!
+        val y0 = hOnly.camY
+        h2.props["x"] = 900.0; h2.props["y"] = 50.0; hOnly.update(1.0 / 60)
+        check("followY off: only moves sideways", near(hOnly.camX, 900.0) && near(hOnly.camY, y0), "${hOnly.camX} ${hOnly.camY} $y0")
+        val vOnly = cam(base.format("\t\tfollowX = false\n"))
+        val v2 = vOnly.tree.find(vOnly.tree.root!!, "Hero")!!; val x0 = vOnly.camX
+        v2.props["x"] = 900.0; v2.props["y"] = 50.0; vOnly.update(1.0 / 60)
+        check("followX off: only moves up and down", near(vOnly.camX, x0) && near(vOnly.camY, 50.0))
+
+        val slow = cam(base.format("").replace("smoothing = 0", "smoothing = 0.5"))
+        val s2 = slow.tree.find(slow.tree.root!!, "Hero")!!
+        s2.props["x"] = 400.0; s2.props["y"] = 200.0; repeat(30) { slow.update(1.0 / 60) }    // half a second = one time constant
+        check("smoothing is a time constant (about 63% after one)", Math.abs((slow.camX - 300.0) / 100.0 - 0.632) < 0.03, slow.camX.toString())
+        val fast = cam(base.format("").replace("smoothing = 0", "smoothing = 0.5"))
+        val f2 = fast.tree.find(fast.tree.root!!, "Hero")!!
+        f2.props["x"] = 400.0; repeat(15) { fast.update(1.0 / 30) }       // the same half second at another frame rate
+        check("smoothing does not depend on the frame rate", Math.abs(fast.camX - slow.camX) < 0.5, "${fast.camX} ${slow.camX}")
+        repeat(600) { slow.update(1.0 / 60) }
+        check("smoothing arrives eventually", near(slow.camX, 400.0, 0.05))
+        s2.props["x"] = 1000.0; slow.tree.find(slow.tree.root!!, "Cam")!!.props["_snap"] = true; slow.update(1.0 / 60)
+        check("snapToTarget jumps at once", near(slow.camX, 1000.0))
+
+        val off = cam(base.format("\t\toffsetX = 50\n\t\toffsetY = -80\n"))
+        check("offset shifts the view", near(off.camX, 350.0) && near(off.camY, 120.0))
+
+        val byTag = cam(base.format("").replace("/World/Hero", "#hero"))
+        check("a #tag can be the target", near(byTag.camX, 300.0))
+        val missing = cam(base.format("").replace("/World/Hero", "/World/Nobody"))
+        missing.update(1.0 / 60); check("a missing target leaves the camera alone", near(missing.camX, 0.0) && near(missing.camY, 0.0), "${missing.camX} ${missing.camY}")
+
+        val lim = cam(base.format("\t\tlimits = true\n\t\tlimitRight = 2000\n\t\tlimitBottom = 1000\n"))
+        val l2 = lim.tree.find(lim.tree.root!!, "Hero")!!
+        check("limits stop the view at the left/top edge", near(lim.camX, 640.0) && near(lim.camY, 360.0), "${lim.camX} ${lim.camY}")
+        l2.props["x"] = 1900.0; l2.props["y"] = 990.0; lim.update(1.0 / 60)
+        check("limits stop the view at the right/bottom edge", near(lim.camX, 2000.0 - 640.0) && near(lim.camY, 1000.0 - 360.0), "${lim.camX} ${lim.camY}")
+        val tiny = cam(base.format("\t\tlimits = true\n\t\tlimitRight = 1000\n\t\tlimitBottom = 500\n"))
+        check("a level smaller than the screen is centred", near(tiny.camX, 500.0) && near(tiny.camY, 250.0))
+        val zl = cam(base.format("\t\tlimits = true\n\t\tlimitRight = 2000\n\t\tlimitBottom = 1000\n\t\tzoom = 2\n"))
+        check("limits account for zoom (the view is smaller)", near(zl.camX, 320.0) && near(zl.camY, 200.0), "${zl.camX} ${zl.camY}")   // hero x 300 is clamped to 320, y 200 is already inside 180..820
+
+        // fixed nodes ignore the camera: an on-screen button keeps working when the view has moved away
+        val hud = cam("scene \"C\"\nnode World Node2D\n\tnode Cam Camera\n\t\tx = 1000\n\t\ty = 500\n" +
+            "\tnode Pad Button\n\t\taction = \"left\"\n\t\tfixed = true\n\t\tx = 100\n\t\ty = 100\n\t\twidth = 80\n\t\theight = 80\n" +
+            "\tnode WorldPad Button\n\t\taction = \"right\"\n\t\tx = 100\n\t\ty = 100\n\t\twidth = 80\n\t\theight = 80\n" +
+            "\tnode Tapper Node2D\n\t\ttouchable = true\n\t\tfixed = true\n\t\tx = 200\n\t\ty = 200\n\t\twidth = 40\n\t\theight = 40\n")
+        hud.update(1.0 / 60)
+        hud.setPointers(listOf(100.0 to 100.0))
+        check("fixed button works at its screen spot, a world one does not", hud.input.isDown("left") && !hud.input.isDown("right"))
+        check("touches() are world positions", hud.input.touches.single().let { near(it.first, 1000.0 + (100.0 - 640.0)) && near(it.second, 500.0 + (100.0 - 360.0)) })
+        hud.setPointers(listOf(640.0 + (100.0 - 1000.0) to 360.0 + (100.0 - 500.0)))   // the screen spot where the world button now appears
+        check("a world button is hit where the camera shows it", hud.input.isDown("right") && !hud.input.isDown("left"))
+        check("tap on a fixed node uses screen coordinates", hud.tap(200.0, 200.0) && !hud.tap(640.0, 360.0))
+    }
+    run {   // the camera script API compiles through snc
+        val cp = Project.create(File(tmp, "camapi"), "Cam Api", preset = Preset.BLANK)
+        File(cp.dir, "scripts/cam.nbs").writeText("script Rig of Camera:\n\tfn onReady():\n\t\tsetZoom(1.5)\n\t\tlog(zoom())\n\t\tfollowTag(\"player\")\n\t\tfollowNode(@/World/Hero)\n\t\tsetSmoothing(0.3)\n\t\tlog(smoothing())\n\t\tsetFollowAxes(true, false)\n\t\tsetOffset(0.0, -60.0)\n\t\tsetLimits(0.0, 0.0, 3000.0, 800.0)\n\t\tclearLimits()\n\t\tsnapToTarget()\n\t\tlog(isFollowing())\n\t\tstopFollowing()\n")
+        File(cp.dir, "scripts/hud.nbs").writeText("script Hud of Label:\n\tfn onReady():\n\t\tsetFixed(true)\n\t\tlog(isFixed())\n")
+        val r = Builder(cp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("Camera API compiles with snc", r.ok, r.messages.joinToString("\n     "))
+    }
 
     println(if (failures == 0) "\nALL PASSED" else "\n$failures FAILED")
     System.exit(if (failures == 0) 0 else 1)

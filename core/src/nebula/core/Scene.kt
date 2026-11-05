@@ -13,6 +13,9 @@ class SceneNode(val id: Long, var name: String, val type: String) {
     var tileSrc: String? = null
     var tileDirty = false                           // the cache holds script edits the `tiles` string does not have yet
 
+    /** True for a node (or a node under a node) with `fixed` on: it is placed on the screen and ignores the camera, like a score label or an on-screen button. */
+    fun isFixed(): Boolean { var c: SceneNode? = this; while (c != null) { if (c.b("fixed")) return true; c = c.parent }; return false }
+
     /** Position in game units: the sum of this node's and its Node2D ancestors' x and y. */
     fun worldPos(): Pair<Double, Double> {
         var x = 0.0; var y = 0.0; var c: SceneNode? = this
