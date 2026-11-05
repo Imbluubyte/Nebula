@@ -70,7 +70,7 @@ object Renderer {
                 val h = if (n.f("height") > 0) n.f("height") else if (bmp != null) bmp.height.toDouble() / v.rows else 64.0
                 w * s to h * s
             }
-            "Shape", "Button", "Body" -> n.f("width") * s to n.f("height") * s
+            "Shape", "Button", "Body", "SpawnableBody" -> n.f("width") * s to n.f("height") * s
             "Label" -> (n.s("text").length * n.f("fontSize") * 0.55).coerceAtLeast(24.0) * s to n.f("fontSize") * 1.3 * s
             else -> 40.0 to 40.0
         }
@@ -89,7 +89,7 @@ object Renderer {
                     if (n.s("shape") == "circle") drawOval(c, Offset(cx - w / 2, cy - h / 2), Size(w, h))
                     else drawRect(c, Offset(cx - w / 2, cy - h / 2), Size(w, h))
                 }
-                "Body" -> {
+                "Body", "SpawnableBody" -> {
                     val w = (n.f("width") * s).toFloat(); val h = (n.f("height") * s).toFloat()
                     val c = parseColor(n.s("color"), Color.Transparent)
                     if (c != Color.Transparent) drawRect(c, Offset(cx - w / 2, cy - h / 2), Size(w, h))

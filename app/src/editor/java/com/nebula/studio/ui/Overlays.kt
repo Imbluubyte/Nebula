@@ -1,6 +1,7 @@
 package com.nebula.studio.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,6 +26,7 @@ import com.nebula.studio.Commands
 import com.nebula.studio.Modal
 import com.nebula.studio.Studio
 import nebula.core.NodeTypes
+import nebula.core.Preset
 
 /** Dialogs are drawn inside the window (not as system dialogs) so keyboard shortcuts keep working. */
 @Composable
@@ -81,13 +83,23 @@ private fun TextPrompt(studio: Studio, title: String, label: String, initial: St
 private fun NewProjectDialog(studio: Studio) {
     var name by remember { mutableStateOf("MyGame") }
     var pkg by remember { mutableStateOf("") }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var preset by remember { mutableStateOf(Preset.PLATFORMER) }
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("New project", color = C.text, fontSize = 18.sp)
         Field("MyGame", { name = it }, label = "Name")
         Field("", { pkg = it }, label = "Package id (optional)", placeholder = "com.example.mygame", mono = true)
-        Text("The project starts with a small playable scene and three scripts to learn from.", color = C.dim, fontSize = 12.sp)
+        Text("Start from", color = C.dim, fontSize = 12.sp)
+        for (p in Preset.values()) {
+            val on = p == preset
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (on) C.sel else C.panel2)
+                .border(if (on) 2.dp else 1.dp, if (on) C.accent else C.line, RoundedCornerShape(12.dp))
+                .clickable { preset = p }.heightIn(min = 56.dp).padding(12.dp)) {
+                Text(p.label, color = C.text, fontSize = 15.sp)
+                Text(p.blurb, color = C.dim, fontSize = 12.sp)
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextBtn("Create", { studio.modal = null; studio.createProject(name, pkg) }, primary = true); TextBtn("Cancel", { studio.modal = null })
+            TextBtn("Create", { studio.modal = null; studio.createProject(name, pkg, preset) }, primary = true); TextBtn("Cancel", { studio.modal = null })
         }
     }
 }

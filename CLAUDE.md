@@ -25,7 +25,7 @@ There is no README on purpose. The usage guide is `docs/GUIDE.md`, the syntax re
 
 ```
 KOTLINC=<path>/kotlinc SNC=<path>/snc sh tests/run-core.sh    # core tests (compiles core/ with kotlinc, ~1 min)
-sh tests/run-native.sh                                         # after run-core: starter .so driven by a fake C engine
+sh tests/run-native.sh                                         # after run-core: demo fixture .so driven by a fake C engine
 ```
 Kotlinc: `curl -L -o k.zip https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip`
 (GitHub downloads work, Maven does not). snc: `cd SuperNova/compiler && cargo build --release`.
@@ -57,7 +57,8 @@ The app module has two flavors. **editor** (`app/src/editor`): Studio, ui, build
 | `.nscn` text format | `core/.../SceneFile.kt` |
 | editor operations + undo/redo (add/delete/move/duplicate/props) | `core/.../SceneEditor.kt` |
 | project folder (incl. `createFolder`, `folders`), `project.nebula` settings, `Builder` (transpile + snc) | `core/.../Project.kt` |
-| the starter project template | `core/.../Templates.kt` |
+| the new-project presets (platformer, top down, blank; commented player scripts) | `core/.../Templates.kt` (`Preset`, `Templates.files`), picker in `NewProjectDialog` (`ui/Overlays.kt`), `Project.create(..., preset)`. Test fixture of the old demo (Hero/Coin/Score) is `core/test/Fixtures.kt` |
+| SpawnableBody (lifetime, health, launch/chase, spawnBody/Burst/Ring) | `NodeTypes.kt` (type + `bodyTypes`), `Engine.serviceSpawnables` (lifetime), `api/nebula.sn` (`class SpawnableBody`, spawn helpers on `Node`); physics treats every type in `NodeTypes.bodyTypes` as a Body |
 | editor state, project open/save, run/stop/build/export orchestration | `app/.../Studio.kt` (single state holder; panels read it) |
 | commands + keyboard shortcuts + palette list | `app/.../Commands.kt` |
 | layout (wide 3-pane / compact bottom-nav), top bar, status bar | `app/.../ui/StudioScreen.kt` |
@@ -100,6 +101,9 @@ Paths in this file written `app/.../` mean `app/src/editor/java/com/nebula/studi
 
 Done: node/scene system, `.nscn` format, editor UI (tree with scripts, viewport, inspector, script editor, console, files,
 palette, shortcuts), Nebula script layer, broadcasts, onFrame/onTick/onEvery, simple physics, run in editor, APK export,
-CI, folders in the Files panel, sprite sheet animation manager + Sound node controls, FPS counter, slim player APK for exports, export to Downloads.
-Ideas not done: tilemaps, animation blending, particles, audio mixer, scene instancing UI, in-editor interpreter (no Termux),
+CI, folders in the Files panel, sprite sheet animation manager + Sound node controls, FPS counter, slim player APK for exports, export to Downloads,
+SpawnableBody node, new-project presets (platformer / top down / blank).
+In progress (asked for by the user, in this order): tilemaps, camera controls (zoom, static vs follow, follow smoothing, horizontal-only vs full follow).
+Known limit: physics checks every body pair each frame (fine for ~1000 bodies, a spatial grid is the next step if a game needs more).
+Ideas not done: animation blending, particles, audio mixer, scene instancing UI, in-editor interpreter (no Termux),
 script hot reload, 3D, go-to-definition/completion in the script editor, drag-reorder in the tree.

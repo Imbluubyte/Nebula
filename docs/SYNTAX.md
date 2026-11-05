@@ -74,6 +74,9 @@ Built-in broadcasts:
 | --- | --- | --- |
 | `tapped(x, y)` | every Node2D (needs `touchable`; Buttons are touchable) | the node is tapped |
 | `collided(other)` | Body | it starts touching another Body |
+| `expired` | SpawnableBody | its `lifetime` ran out (it is freed right after) |
+| `died` | SpawnableBody | `die()` ran, or `hurt()` took its health to 0 |
+| `damaged(amount)` | SpawnableBody | `hurt(amount)` was called |
 | `animationFinished` | Sprite | a clip that does not loop reaches its last frame |
 | `freed` | every node | it is removed |
 
@@ -122,6 +125,13 @@ Frames of a sheet are numbered from 1, left to right then top to bottom.
 `start()` plays the node's sound (with its volume, pitch and loop), `stop()` stops it, `setFile(file) setVolume(0..1) setPitch(0.5..2) setLoop(b)`.
 Set `autoplay` in the inspector to start it when the scene starts.
 
+### SpawnableBody
+A Body (so everything below Body applies) made to be spawned many times. Properties `lifetime health maxHealth damage`.
+`lifetime() setLifetime(s) age() health() maxHealth() setHealth(n) setMaxHealth(n) hurt(n) heal(n) die() isDead() damage() setDamage(n) dealDamage(other) -> Bool`.
+`launch(angle, speed)`, `launchAt(node, speed)`, `angleTo(x, y)`, `chase(node, speed)`; angles are degrees, 0 = right, 90 = down.
+Callable from any script: `spawnBody(scene, parent, x, y) -> SpawnableBody` (the scene root must be a SpawnableBody), `spawnBurst(scene, parent, x, y, count, speed, startAngle = 0.0)`,
+`spawnRing(scene, parent, x, y, count, radius, startAngle = 0.0)` (both return the list of bodies), `countTagged(label)`, `nearest(label, x, y) -> Node2D` (throws when nothing is tagged).
+
 ### Shape, Label, Body, Camera
 Shape: `color() setColor("#RRGGBB") width() height() setSize(w, h)`.
 Label: `text() setText(x) setColor(hex) setFontSize(n)`.
@@ -139,6 +149,7 @@ Camera: `setZoom(z)`.
 | Label | `text fontSize color` |
 | Button | `text width height fontSize color action` |
 | Body | `vx vy gravity width height solid static bounce color` |
+| SpawnableBody | everything of Body, plus `lifetime health maxHealth damage` |
 | Camera | `zoom` |
 | Sound | `file volume pitch loop autoplay` |
 

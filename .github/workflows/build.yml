@@ -67,7 +67,7 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Imbluubyte/SuperNova "$HOME/SuperNova"
           cd "$HOME/SuperNova/compiler" && cargo build --release
-      - name: Core tests (transpiler, scene, engine, starter project through snc)
+      - name: Core tests (transpiler, scene, engine, presets and SpawnableBody through snc)
         run: |
           export KOTLINC="$HOME/kotlinc/bin/kotlinc" SNC="$HOME/SuperNova/compiler/target/release/snc"
           sh tests/run-core.sh && sh tests/run-native.sh

@@ -169,6 +169,7 @@ class Engine(
         }
         animate(dt)
         serviceSounds()
+        serviceSpawnables(dt)
         physics(dt)
         host?.pump(); check()
         flush()
@@ -264,8 +265,23 @@ class Engine(
         return true
     }
 
+    /** SpawnableBody: age it, and when its lifetime runs out tell the script (`expired`) and free it. */
+    private fun serviceSpawnables(dt: Double) {
+        for (n in tree.all()) {
+            if (n.type != "SpawnableBody") continue
+            val age = n.f("_age") + dt
+            n.props["_age"] = age
+            val life = n.f("lifetime")
+            if (life > 0 && age >= life && n.id !in pendingFree && !n.b("_dead")) {
+                n.props["_dead"] = true
+                host?.fire(n.id, "expired", 0.0, 0.0, 0); check()
+                pendingFree.add(n.id)
+            }
+        }
+    }
+
     private fun physics(dt: Double) {
-        val bodies = tree.all().filter { it.type == "Body" }
+        val bodies = tree.all().filter { it.type in NodeTypes.bodyTypes }
         for (b in bodies) {
             b.props["onGround"] = false
             if (b.b("static")) continue
@@ -273,14 +289,19 @@ class Engine(
             b.props["x"] = b.f("x") + b.f("vx") * dt
             b.props["y"] = b.f("y") + b.f("vy") * dt
         }
+        // world positions are looked up once per frame (not once per pair) so hundreds of bodies stay cheap
+        val n = bodies.size
+        val wx = DoubleArray(n); val wy = DoubleArray(n)
+        for (i in 0 until n) { val (px, py) = worldPos(bodies[i]); wx[i] = px; wy[i] = py }
+        val ww = DoubleArray(n) { bodies[it].f("width") }; val hh = DoubleArray(n) { bodies[it].f("height") }
         val overlapping = HashSet<Long>()
-        for (i in bodies.indices) for (j in i + 1 until bodies.size) {
+        for (i in 0 until n) for (j in i + 1 until n) {
             val a = bodies[i]; val b = bodies[j]
-            val (ax, ay) = worldPos(a); val (bx, by) = worldPos(b)
-            val dx = ax - bx; val dy = ay - by
-            val ox = (a.f("width") + b.f("width")) / 2 - Math.abs(dx)
-            val oy = (a.f("height") + b.f("height")) / 2 - Math.abs(dy)
-            if (ox <= 0 || oy <= 0) continue
+            val dx = wx[i] - wx[j]; val dy = wy[i] - wy[j]
+            val ox = (ww[i] + ww[j]) / 2 - Math.abs(dx)
+            if (ox <= 0) continue
+            val oy = (hh[i] + hh[j]) / 2 - Math.abs(dy)
+            if (oy <= 0) continue
             val key = minOf(a.id, b.id) * 1_000_000L + maxOf(a.id, b.id)
             overlapping.add(key)
             if (key !in touching) {
@@ -288,8 +309,8 @@ class Engine(
                 host?.fire(b.id, "collided", 0.0, 0.0, a.id); check()
             }
             val aSolid = a.b("solid") && a.b("static"); val bSolid = b.b("solid") && b.b("static")
-            if (bSolid && !a.b("static")) resolve(a, dx, dy, ox, oy)
-            else if (aSolid && !b.b("static")) resolve(b, -dx, -dy, ox, oy)
+            if (bSolid && !a.b("static")) { resolve(a, dx, dy, ox, oy); worldPos(a).let { wx[i] = it.first; wy[i] = it.second } }
+            else if (aSolid && !b.b("static")) { resolve(b, -dx, -dy, ox, oy); worldPos(b).let { wx[j] = it.first; wy[j] = it.second } }
         }
         touching.retainAll(overlapping); touching.addAll(overlapping)
     }

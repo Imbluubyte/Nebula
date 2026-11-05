@@ -39,11 +39,19 @@ object NodeTypes {
             f("vx", 0.0), f("vy", 0.0), f("gravity", 0.0), f("width", 32.0), f("height", 32.0),
             b("solid", false), b("static", false), f("bounce", 0.0), b("onGround", false), s("color", "", "color")),
             listOf(BcDef("collided", listOf("Node"))), "P"),
+        // A Body made to be spawned over and over (bullets, enemies, pickups). The engine counts its lifetime down;
+        // health, damage and the launch/chase helpers live in the script API (api/nebula.sn).
+        NodeType("SpawnableBody", "Body", listOf(
+            f("lifetime", 0.0, "seconds until it expires by itself, 0 = never"), f("health", 1.0), f("maxHealth", 1.0), f("damage", 1.0)),
+            listOf(BcDef("expired"), BcDef("died"), BcDef("damaged", listOf("Float"))), "*"),
         NodeType("Camera", "Node2D", listOf(f("zoom", 1.0)), icon = "C"),
         NodeType("Sound", "Node", listOf(s("file", "", "sound"), f("volume", 1.0), f("pitch", 1.0), b("loop", false), b("autoplay", false)), icon = "A"),
     )
 
     private val byName = all.associateBy { it.name }
+
+    /** Every type that moves and collides like a Body (the engine's physics loop). */
+    val bodyTypes: Set<String> by lazy { all.filter { isA(it.name, "Body") }.map { it.name }.toSet() }
     fun get(name: String): NodeType? = byName[name]
     fun exists(name: String) = name in byName
 

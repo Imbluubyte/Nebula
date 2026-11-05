@@ -68,10 +68,11 @@ class Project(val dir: File) {
     companion object {
         val ROOTS = listOf("scenes", "scripts", "assets", "animations")
 
-        fun create(dir: File, title: String, packageId: String = "com.nebula.game"): Project {
+        fun create(dir: File, title: String, packageId: String = "com.nebula.game", preset: Preset = Preset.PLATFORMER): Project {
             dir.mkdirs()
             val p = Project(dir); p.title = title; p.packageId = packageId; p.save()
-            for ((path, text) in Templates.starter(title)) { val f = File(dir, path); f.parentFile.mkdirs(); f.writeText(text) }
+            for (r in ROOTS) File(dir, r).mkdirs()      // a blank project still gets its scenes/scripts/assets/animations folders
+            for ((path, text) in Templates.files(preset, title)) { val f = File(dir, path); f.parentFile.mkdirs(); f.writeText(text) }
             return p
         }
     }

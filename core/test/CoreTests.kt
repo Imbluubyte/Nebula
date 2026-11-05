@@ -69,7 +69,8 @@ fun main(args: Array<String>) {
     check("@ in strings/comments", lo.ok && "mail@x.com" in lo.source && "nodeAt(id, \"Foo/Bar\")" in lo.source && "# @Ignored" in lo.source, lo.diags.toString() + lo.source)
 
     // --- starter project builds with snc
-    val proj = Project.create(File(tmp, "game"), "Test Game")
+    val proj = Project.create(File(tmp, "game"), "Test Game", preset = Preset.BLANK)
+    for ((path, text) in Fixtures.demo()) File(proj.dir, path).also { it.parentFile.mkdirs() }.writeText(text)
     val lowered = Builder(proj, ProcessRunner(), apiDir.absoluteFile, snc).lower()
     check("starter lowers", lowered.ok, lowered.diags.toString())
     val res = Builder(proj, ProcessRunner(), apiDir.absoluteFile, snc).build()
@@ -80,7 +81,7 @@ fun main(args: Array<String>) {
     File(proj.dir, "scripts/hero.nbs").appendText("\tfn broken():\n\t\tvar n: Int = \"text\"\n")
     val bad = Builder(proj, ProcessRunner(), apiDir.absoluteFile, snc).build()
     check("errors remap to .nbs", !bad.ok && bad.messages.any { "scripts/hero.nbs:" in it }, bad.messages.joinToString("\n     "))
-    File(proj.dir, "scripts/hero.nbs").writeText(Templates.starter("x")["scripts/hero.nbs"]!!)
+    File(proj.dir, "scripts/hero.nbs").writeText(Fixtures.demo()["scripts/hero.nbs"]!!)
 
     // the new Sprite animation and Sound API must compile through snc
     val apiProj = Project.create(File(tmp, "apitest"), "Api Test")
@@ -188,6 +189,89 @@ fun main(args: Array<String>) {
     ed.setProp(ed.tree.root!!.child("Hero")!!, "x", 321.0)
     check("prop edit survives roundtrip", SceneFile.parse(ed.toText()).root.children.first { it.name == "Hero" }.props["x"] == 321.0)
     check("delete root refused", !ed.delete(ed.tree.root!!))
+
+    // --- presets: every preset lowers, builds and plays
+    for (preset in Preset.values()) {
+        val pp = Project.create(File(tmp, "preset-${preset.id}"), "P ${preset.label}", preset = preset)
+        val low = Builder(pp, ProcessRunner(), apiDir.absoluteFile, snc).lower()
+        check("preset ${preset.id} lowers", low.ok, low.diags.toString())
+        val built = Builder(pp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("preset ${preset.id} compiles with snc", built.ok, built.messages.joinToString("\n     "))
+        check("preset ${preset.id} scene parses", runCatching { SceneFile.parse(pp.readText("scenes/main.nscn")!!) }.isSuccess)
+    }
+    check("blank preset has no scripts", Project(File(tmp, "preset-blank")).scripts().isEmpty())
+    check("presets found by id", Preset.byId("topdown") == Preset.TOP_DOWN && Preset.byId("nonsense") == Preset.PLATFORMER)
+    for (preset in listOf(Preset.PLATFORMER, Preset.TOP_DOWN)) {
+        val pp = Project(File(tmp, "preset-${preset.id}"))
+        val text = pp.readText("scripts/player.nbs")!!
+        check("preset ${preset.id} script is commented", text.lines().count { it.trim().startsWith("#") } >= 12, text.lines().count { it.trim().startsWith("#") }.toString())
+        val meta = MetaFile.read(File(pp.buildDir, "scripts.meta").readText())
+        check("preset ${preset.id} player has a speed tweak", meta["Player"]?.tweaks?.any { it.name == "speed" } == true && meta["Player"]?.frame == true)
+    }
+    run {   // platformer: the player lands on the ground, and a dropped player rests on the platform
+        val pp = Project(File(tmp, "preset-platformer"))
+        val metas2 = MetaFile.read(File(pp.buildDir, "scripts.meta").readText())
+        val e = Engine({ pp.readText(it) }, metas2, FakeHost(), { })
+        check("platformer loads", e.loadScene("scenes/main.nscn"))
+        val player = e.tree.tagged("player").single()
+        repeat(120) { e.update(1.0 / 60) }
+        check("platformer player stands on the ground", player.b("onGround") && Math.abs(player.f("y") - 636.0) < 1.5, player.props.toString())
+        player.props["x"] = 900.0; player.props["y"] = 400.0; player.props["vy"] = 0.0
+        repeat(120) { e.update(1.0 / 60) }
+        check("platformer player stands on the platform", player.b("onGround") && Math.abs(player.f("y") - 524.0) < 1.5, player.props.toString())
+    }
+    run {   // top down: no gravity, the walls keep the player inside the room
+        val pp = Project(File(tmp, "preset-topdown"))
+        val metas2 = MetaFile.read(File(pp.buildDir, "scripts.meta").readText())
+        val e = Engine({ pp.readText(it) }, metas2, FakeHost(), { })
+        check("top down loads", e.loadScene("scenes/main.nscn"))
+        val player = e.tree.tagged("player").single()
+        repeat(60) { e.update(1.0 / 60) }
+        check("top down player does not fall", Math.abs(player.f("y") - 360.0) < 0.5 && Math.abs(player.f("x") - 640.0) < 0.5)
+        for (dir in listOf(1.0 to 0.0, -1.0 to 0.0, 0.0 to 1.0, 0.0 to -1.0)) {
+            player.props["x"] = 640.0; player.props["y"] = 360.0
+            repeat(150) { player.props["vx"] = dir.first * 900.0; player.props["vy"] = dir.second * 900.0; e.update(1.0 / 60) }
+            check("top down walls stop the player (${dir.first},${dir.second})", player.f("x") in 39.0..1241.0 && player.f("y") in 39.0..681.0 && (player.f("x") !in 635.0..645.0 || player.f("y") !in 355.0..365.0), player.props.toString())
+        }
+    }
+
+    // --- SpawnableBody
+    check("SpawnableBody is a Body", NodeTypes.exists("SpawnableBody") && NodeTypes.isA("SpawnableBody", "Body") && "SpawnableBody" in NodeTypes.bodyTypes)
+    check("SpawnableBody broadcasts", NodeTypes.broadcastsOf("SpawnableBody").map { it.name }.containsAll(listOf("expired", "died", "damaged", "collided", "tapped")))
+    run {
+        val sp = Project.create(File(tmp, "spawn"), "Spawn", preset = Preset.BLANK)
+        File(sp.dir, "scenes/main.nscn").writeText("scene \"S\"\nnode World Node2D\n\tnode Ground Body\n\t\tx = 400\n\t\ty = 500\n\t\twidth = 800\n\t\theight = 40\n\t\tsolid = true\n\t\tstatic = true\n" +
+            "\tnode Short SpawnableBody\n\t\tlifetime = 0.5\n\t\tx = 100\n\t\ty = 100\n" +
+            "\tnode Forever SpawnableBody\n\t\tx = 200\n\t\ty = 100\n\t\tgravity = 1000\n\t\tsolid = true\n")
+        val logs2 = ArrayList<String>(); val h = FakeHost()
+        val e = Engine({ sp.readText(it) }, emptyMap(), h, { logs2.add(it) })
+        check("spawn scene loads", e.loadScene("scenes/main.nscn"), logs2.toString())
+        val short = e.tree.find(e.tree.root!!, "Short")!!; val forever = e.tree.find(e.tree.root!!, "Forever")!!
+        h.calls.clear()
+        repeat(20) { e.update(1.0 / 60) }
+        check("lifetime not over yet", e.tree.alive(short.id) && h.calls.none { it.contains("expired") })
+        repeat(20) { e.update(1.0 / 60) }   // 0.66 s in
+        check("expired fires once", h.calls.count { it == "fire ${short.id} expired 0" } == 1, h.calls.toString())
+        check("expired body is freed", !e.tree.alive(short.id) && h.calls.contains("freed ${short.id}"))
+        repeat(600) { e.update(1.0 / 60) }   // 10 more seconds
+        check("lifetime 0 lives on", e.tree.alive(forever.id))
+        check("SpawnableBody falls and lands like a Body", forever.b("onGround") && forever.f("y") < 500.0 && forever.f("y") > 400.0, forever.props.toString())
+        check("age counts up", forever.f("_age") > 10.0)
+        // many bodies at once stay fast (the bullet-heaven case)
+        val parent = e.tree.root!!
+        repeat(600) { i -> e.apiAdd(parent.id, "SpawnableBody", "B$i").let { id -> e.tree.get(id)!!.props.apply { put("x", (i * 37 % 1200).toDouble()); put("y", (i * 53 % 400).toDouble()); put("width", 8.0); put("height", 8.0) } } }
+        val t0 = System.nanoTime(); repeat(60) { e.update(1.0 / 60) }; val ms = (System.nanoTime() - t0) / 1e6
+        check("600 bodies simulate quickly", ms < 2500, "%.0f ms for 60 frames".format(ms))
+    }
+    run {   // the whole script API must compile through snc
+        val sp = Project.create(File(tmp, "spawnapi"), "Spawn Api", preset = Preset.BLANK)
+        File(sp.dir, "scripts/bullet.nbs").writeText("script Bullet of SpawnableBody:\n\tfn onReady():\n\t\ttag(\"bullet\")\n\t\tsetLifetime(2.0)\n\tfn onHear(collided, other):\n\t\tif dealDamage(other):\n\t\t\tdie()\n\tfn onHear(expired):\n\t\tlog(\"gone\")\n")
+        File(sp.dir, "scripts/enemy.nbs").writeText("script Enemy of SpawnableBody:\n\tfn onReady():\n\t\tsetMaxHealth(5.0)\n\t\tsetHealth(4.0)\n\t\tsetDamage(2.0)\n\t\ttag(\"enemy\")\n\tfn onFrame():\n\t\tvar p = @/World/Hero as Node2D\n\t\tchase(p, 80.0)\n\tfn onHear(damaged, amount):\n\t\tlog(f\"ouch {amount} {health()} of {maxHealth()}\")\n\tfn onHear(died):\n\t\tlog(f\"dead {isDead()} {age()} {lifetime()} {damage()}\")\n")
+        File(sp.dir, "scripts/hero.nbs").writeText("script Hero of Node2D:\n\tfn onReady():\n\t\tvar b = spawnBody(\"scenes/bullet.nscn\", parent(), x(), y())\n\t\tb.launch(45.0, 300.0)\n\t\tb.launchAt(@/World/Hero as Node2D, 50.0)\n\t\tb.hurt(1.0)\n\t\tb.heal(0.5)\n\t\tlog(b.angleTo(10.0, 10.0))\n\t\tvar ring = spawnRing(\"scenes/bullet.nscn\", parent(), 0.0, 0.0, 6, 100.0)\n\t\tvar burst = spawnBurst(\"scenes/bullet.nscn\", parent(), 0.0, 0.0, 8, 200.0, 15.0)\n\t\tlog(ring.length() + burst.length())\n\t\tif countTagged(\"enemy\") > 0:\n\t\t\tvar near = nearest(\"enemy\", x(), y())\n\t\t\tlog(near.x())\n\tfn onHear(@/World/Enemy.damaged, amount):\n\t\tlog(amount)\n\tfn onHear(@/World/Enemy.died):\n\t\tlog(\"enemy died\")\n")
+        val r = Builder(sp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("SpawnableBody API compiles with snc", r.ok, r.messages.joinToString("\n     "))
+    }
+
 
     println(if (failures == 0) "\nALL PASSED" else "\n$failures FAILED")
     System.exit(if (failures == 0) 0 else 1)

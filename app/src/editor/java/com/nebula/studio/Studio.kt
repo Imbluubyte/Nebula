@@ -246,11 +246,11 @@ class Studio(val ctx: Context) {
     fun post(block: () -> Unit) { if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block) }
 
     // ------------------------------------------------------------------ projects
-    fun createProject(name: String, pkg: String) {
+    fun createProject(name: String, pkg: String, preset: Preset = Preset.PLATFORMER) {
         val clean = name.trim().replace(Regex("[^A-Za-z0-9_ -]"), "").ifEmpty { "MyGame" }
         val dir = File(root, clean)
         if (dir.exists()) { error("A project called '$clean' already exists."); return }
-        val p = Project.create(dir, clean, pkg.ifBlank { "com.nebula." + clean.lowercase().replace(Regex("[^a-z0-9]"), "") })
+        val p = Project.create(dir, clean, pkg.ifBlank { "com.nebula." + clean.lowercase().replace(Regex("[^a-z0-9]"), "") }, preset)
         openProject(p.dir)
     }
 

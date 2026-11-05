@@ -34,7 +34,7 @@ class Lowered(val source: String, val metas: List<ScriptMeta>, val diags: List<D
  */
 object Transpiler {
     private val headerRe = Regex("""^script\s+([A-Za-z_]\w*)(?:\s+of\s+([A-Za-z_]\w*))?\s*:\s*$""")
-    private val reserved = NodeTypes.scriptClassNames + setOf("Bc0", "BcNode", "BcPoint", "Vec2")
+    private val reserved = NodeTypes.scriptClassNames + setOf("Bc0", "BcNode", "BcPoint", "BcFloat", "Vec2")
 
     private class Script(val src: ScriptSource, val name: String, val base: String, val headerLine: Int,
                          val body: List<Pair<Int, String>>, val extras: List<Pair<Int, String>>, val uses: List<String>)

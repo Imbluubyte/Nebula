@@ -46,6 +46,7 @@ var shapes: Dict[Int, Shape] = {}
 var labels: Dict[Int, Label] = {}
 var buttons: Dict[Int, Button] = {}
 var bodies: Dict[Int, Body] = {}
+var spawnables: Dict[Int, SpawnableBody] = {}
 var cameras: Dict[Int, Camera] = {}
 var sounds: Dict[Int, Sound] = {}
 
@@ -108,6 +109,17 @@ class BcPoint:
 		for i in 1..handlers.length():
 			if nb_alive(owners[i]):
 				handlers[i](x, y)
+
+class BcFloat:
+	var handlers: List[Fn(Float)] = []
+	var owners: List[Int] = []
+	fn connect(handler: Fn(Float), owner: Int):
+		handlers.add(handler)
+		owners.add(owner)
+	fn send(value: Float):
+		for i in 1..handlers.length():
+			if nb_alive(owners[i]):
+				handlers[i](value)
 
 # ---- nodes ----------------------------------------------------------------------------
 class Node:
@@ -187,6 +199,48 @@ class Node:
 		return out
 	fn screenSize() -> Vec2:
 		return Vec2(nb_screen_w(), nb_screen_h())
+	# spawning SpawnableBody scenes: spawnBody makes one, spawnBurst fires a ring of them outwards, spawnRing places them round a point
+	fn spawnBody(scene: String, parent: Node, px: Float, py: Float) -> SpawnableBody:
+		var made = nb_spawn(scene, parent.id)
+		if made == 0:
+			throw f"cannot spawn '{scene}'"
+		wrap(made)
+		var found = spawnables.get(made)
+		if found == null:
+			throw f"the root node of '{scene}' must be a SpawnableBody"
+		found.setPosition(px, py)
+		return found
+	fn spawnBurst(scene: String, parent: Node, px: Float, py: Float, count: Int, speed: Float, startAngle: Float = 0.0) -> List[SpawnableBody]:
+		var out: List[SpawnableBody] = []
+		for i in 1..count:
+			var b = spawnBody(scene, parent, px, py)
+			b.launch(startAngle + 360.0 * (i - 1) / count, speed)
+			out.add(b)
+		return out
+	fn spawnRing(scene: String, parent: Node, cx: Float, cy: Float, count: Int, radius: Float, startAngle: Float = 0.0) -> List[SpawnableBody]:
+		var out: List[SpawnableBody] = []
+		for i in 1..count:
+			var a = math.toRadians(startAngle + 360.0 * (i - 1) / count)
+			out.add(spawnBody(scene, parent, cx + math.cos(a) * radius, cy + math.sin(a) * radius))
+		return out
+	# how many live nodes carry this tag, and the closest one to a point (check the count first: nearest throws when there is none)
+	fn countTagged(label: String) -> Int:
+		return nb_tagged_count(label)
+	fn nearest(label: String, fromX: Float, fromY: Float) -> Node2D:
+		var best = 0
+		var bestDist = 0.0
+		for i in 1..nb_tagged_count(label):
+			var other = nb_tagged_at(label, i)
+			if nb_has(other, "x") and nb_alive(other):
+				var dx = nb_get_f(other, "x") - fromX
+				var dy = nb_get_f(other, "y") - fromY
+				var d = dx * dx + dy * dy
+				if best == 0 or d < bestDist:
+					best = other
+					bestDist = d
+		if best == 0:
+			throw f"no node tagged '{label}'"
+		return asNode2D(wrap(best))
 	fn save(key: String, value):
 		nb_store(key, str(value))
 	fn load(key: String, fallback: String = "") -> String:
@@ -337,6 +391,96 @@ class Body extends Node2D:
 	fn onGround() -> Bool:
 		return nb_get_b(id, "onGround")
 
+# A Body built to be spawned many times (bullets, enemies, pickups). Make a scene whose root is a SpawnableBody, then
+# spawnBody("scenes/bullet.nscn", parent, x, y). The engine frees it when its lifetime runs out; hurt/die/launch/chase are below.
+class SpawnableBody extends Body:
+	var expired = Bc0()
+	var died = Bc0()
+	var damaged = BcFloat()
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		spawnables[id] = self
+	fn nbFire(name: String, a: Float, b: Float, other: Int):
+		if name == "expired":
+			expired.send()
+		else:
+			super.nbFire(name, a, b, other)
+	# lifetime in seconds (0 = lives until freed); age counts up from the moment it was spawned
+	fn lifetime() -> Float:
+		return nb_get_f(id, "lifetime")
+	fn setLifetime(seconds: Float):
+		nb_set_f(id, "lifetime", seconds)
+	fn age() -> Float:
+		return nb_get_f(id, "_age")
+	# health: hurt() lowers it and calls die() at 0. setMaxHealth also refills health.
+	fn health() -> Float:
+		return nb_get_f(id, "health")
+	fn maxHealth() -> Float:
+		return nb_get_f(id, "maxHealth")
+	fn setHealth(value: Float):
+		nb_set_f(id, "health", value)
+	fn setMaxHealth(value: Float):
+		nb_set_f(id, "maxHealth", value)
+		nb_set_f(id, "health", value)
+	fn isDead() -> Bool:
+		return nb_get_b(id, "_dead")
+	fn hurt(amount: Float):
+		if nb_get_b(id, "_dead"):
+			return
+		var left = nb_get_f(id, "health") - amount
+		if left < 0.0:
+			left = 0.0
+		nb_set_f(id, "health", left)
+		damaged.send(amount)
+		if left <= 0.0:
+			die()
+	fn heal(amount: Float):
+		var up = nb_get_f(id, "health") + amount
+		if up > nb_get_f(id, "maxHealth"):
+			up = nb_get_f(id, "maxHealth")
+		nb_set_f(id, "health", up)
+	fn die():
+		if nb_get_b(id, "_dead"):
+			return
+		nb_set_b(id, "_dead", true)
+		nb_set_f(id, "health", 0.0)
+		died.send()
+		free()
+	# damage this body deals; dealDamage(other) hurts another SpawnableBody by it (false if other is not one)
+	fn damage() -> Float:
+		return nb_get_f(id, "damage")
+	fn setDamage(value: Float):
+		nb_set_f(id, "damage", value)
+	fn dealDamage(other: Node) -> Bool:
+		if nb_get_b(id, "_dead"):
+			return false
+		var target = spawnables.get(other.id)
+		if target == null:
+			return false
+		target.hurt(nb_get_f(id, "damage"))
+		return true
+	# movement: angles are degrees, 0 = right, 90 = down (screen coordinates)
+	fn launch(angle: Float, speed: Float):
+		var r = math.toRadians(angle)
+		nb_set_f(id, "vx", math.cos(r) * speed)
+		nb_set_f(id, "vy", math.sin(r) * speed)
+		nb_set_f(id, "rotation", angle)
+	fn angleTo(tx: Float, ty: Float) -> Float:
+		return math.toDegrees(math.atan2(ty - nb_get_f(id, "y"), tx - nb_get_f(id, "x")))
+	fn launchAt(target: Node2D, speed: Float):
+		launch(angleTo(target.x(), target.y()), speed)
+	# call every frame (onFrame) to walk straight at a node, e.g. an enemy chasing the player
+	fn chase(target: Node2D, speed: Float):
+		var dx = target.x() - nb_get_f(id, "x")
+		var dy = target.y() - nb_get_f(id, "y")
+		var d = math.hypot(dx, dy)
+		if d < 1.0:
+			nb_set_f(id, "vx", 0.0)
+			nb_set_f(id, "vy", 0.0)
+		else:
+			nb_set_f(id, "vx", dx / d * speed)
+			nb_set_f(id, "vy", dy / d * speed)
+
 class Camera extends Node2D:
 	fn onCreation(id: Int):
 		super.onCreation(id)
@@ -378,6 +522,8 @@ fn wrap(id: Int) -> Node:
 			return Button(id)
 		case "Body":
 			return Body(id)
+		case "SpawnableBody":
+			return SpawnableBody(id)
 		case "Camera":
 			return Camera(id)
 		case "Sound":
@@ -435,6 +581,11 @@ fn asBody(n: Node) -> Body:
 	if r == null:
 		throw f"node '{n.name()}' is a {n.kind()}, not a Body"
 	return r
+fn asSpawnableBody(n: Node) -> SpawnableBody:
+	var r = spawnables.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a SpawnableBody"
+	return r
 fn asCamera(n: Node) -> Camera:
 	var r = cameras.get(n.id)
 	if r == null:
@@ -483,5 +634,6 @@ fn nbFreed(id: Int):
 		labels.remove(id)
 		buttons.remove(id)
 		bodies.remove(id)
+		spawnables.remove(id)
 		cameras.remove(id)
 		sounds.remove(id)

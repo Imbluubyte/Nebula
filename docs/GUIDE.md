@@ -13,6 +13,19 @@ written in SuperNova (plus a few Nebula additions), press **Run**, and export an
 
 Projects without scripts need none of the Termux steps. Scripts are compiled to native code by Termux when you press Run/Build.
 
+### Starting a project
+
+**New project** asks you to pick a preset. Every preset is an ordinary project you can change freely.
+
+| Preset | You get |
+| --- | --- |
+| Platformer | a ground and a platform, and a Player that runs and jumps (arrow keys / A D / Space, or the on-screen buttons) |
+| Top down | a walled room with a floor, and a Player that walks in all directions (arrows / WASD, or the on-screen D-pad) |
+| Blank | an empty scene and no scripts |
+
+The Player script in the first two presets (`scripts/player.nbs`) is commented line by line: it says what each line does and what to change.
+Its numbers (`tweak speed`, `tweak jumpPower`) are also editable in the Inspector.
+
 ## 2. The editor
 
 * **Files tab**: folders for scenes, scripts, animations and assets. Use the folder buttons to create folders (and subfolders); tap a folder to
@@ -40,6 +53,7 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Label | text | text, fontSize, color |
 | Button | on-screen button | text, width, height, color, **action** |
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
+| SpawnableBody | a Body made to be spawned many times (bullets, enemies, pickups) | everything a Body has, plus lifetime, health, maxHealth, damage |
 | Camera | view centre | zoom |
 | Sound | sound player | file, volume, pitch, loop, autoplay |
 
@@ -47,6 +61,42 @@ Positions are in game units (project size, default 1280x720, y grows downward) a
 A **Button with an `action`** (`left`, `right`, `up`, `down`, `jump`, `action`) counts as that action while held: scripts read it with `isDown("left")` /
 `axis("left", "right")`. The keyboard (arrows/WASD, space, Z) feeds the same actions.
 **Body**: gravity pulls it down; a body that is `solid` and `static` is ground that other bodies stand on (`onGround()` becomes true).
+
+### SpawnableBody: bullets, enemies, pickups
+
+A **SpawnableBody** is a Body with the things shoot-em-up and survivor-style games keep needing built in: it can expire on a timer, it has health,
+it can deal damage, and it knows how to fly in a direction or walk at a target. Make a small scene whose **root** is a SpawnableBody
+(`scenes/bullet.nscn`: set its size and color, optionally a script), then spawn it from any script:
+
+```
+script Gun of Node2D:
+	fn onEvery(0.4):
+		# a bullet under the Gun's parent (so it does not move with the Gun), flying right at 500 px/s
+		var b = spawnBody("scenes/bullet.nscn", parent(), x(), y())
+		b.launch(0.0, 500.0)
+
+	fn onEvery(5):
+		# eight bullets in a ring (a burst), or enemies placed round a point (a ring)
+		spawnBurst("scenes/bullet.nscn", parent(), x(), y(), 8, 300.0)
+		spawnRing("scenes/enemy.nscn", parent(), x(), y(), 12, 600.0)
+```
+
+Lifetime: `lifetime` (seconds, 0 = forever) in the Inspector or `setLifetime(s)`. When it runs out the body sends `expired` and is freed, so bullets clean up after themselves.
+Health: `health`, `maxHealth`, `damage` in the Inspector. `hurt(n)` lowers health (sends `damaged(n)`) and calls `die()` at 0; `die()` sends `died` and frees the body.
+`heal(n)`, `setHealth(n)`, `setMaxHealth(n)` (also refills), `isDead()`, `age()` (seconds since it spawned).
+A bullet script can be this short (`dealDamage(other)` hurts `other` by this body's `damage`, and is `false` when `other` is not a SpawnableBody):
+
+```
+script Bullet of SpawnableBody:
+	fn onHear(collided, other):
+		if dealDamage(other):
+			die()
+```
+
+Moving: angles are degrees, 0 = right, 90 = down. `launch(angle, speed)` sets the velocity (and turns the body), `launchAt(node, speed)` launches toward a Node2D,
+`angleTo(x, y)` gives the angle to a point, and `chase(node, speed)` walks straight at a node (call it from `onFrame`, e.g. an enemy following the player).
+Finding targets: `countTagged("enemy")` and `nearest("enemy", x(), y())` (the closest tagged node; check the count first, it fails when there is none).
+Broadcasts: `expired`, `died`, `damaged(amount)`. Spawned bodies are placed in the same space as the parent you pass, so spawn under a container such as `World`, not under a moving node.
 
 ### Sounds and animation
 * **Sound effects**: import `.wav`/`.ogg`/`.mp3` files, then call `play("assets/hit.wav")` from a script, or add a **Sound** node (volume, pitch, loop, autoplay)
@@ -108,6 +158,8 @@ Buttons are touchable), `collided(other)` (Body), `freed` (every node). Handlers
 Node2D: `x() y() position() setPosition(x,y) moveBy(dx,dy) rotation() setRotation(d) turnBy(d) setScale(s) setVisible(b) setLayer(n) setTouchable(b)`.
 Sprite: `setImage(file) setFlipX(b) animate("clip") stopAnimating() setAnimSpeed(x) setFrame(n)`. Sound: `start() stop() setVolume(v) setPitch(p) setLoop(b)`. Shape: `setColor("#RRGGBB") setSize(w,h)`. Label: `setText(x) setColor() setFontSize()`.
 Body: `velocity() setVelocity(vx,vy) push(dvx,dvy) setGravity(g) onGround()`. Camera: `setZoom(z)`.
+SpawnableBody (a Body): `lifetime() setLifetime(s) age() health() maxHealth() setHealth(n) setMaxHealth(n) hurt(n) heal(n) die() isDead() damage() setDamage(n) dealDamage(other) launch(angle, speed) launchAt(node, speed) angleTo(x, y) chase(node, speed)`.
+Every script: `spawnBody(scene, parent, x, y) spawnBurst(scene, parent, x, y, count, speed) spawnRing(scene, parent, x, y, count, radius) countTagged("tag") nearest("tag", x, y)`.
 The full list is `api/nebula.sn` (plain SuperNova: read it). Every Nebula syntax form is explained in `docs/SYNTAX.md`.
 
 ## 5. Run, build, export
