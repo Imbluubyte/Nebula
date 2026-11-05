@@ -54,6 +54,7 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Button | on-screen button | text, width, height, color, **action** |
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
 | SpawnableBody | a Body made to be spawned many times (bullets, enemies, pickups) | everything a Body has, plus lifetime, health, maxHealth, damage |
+| TileMap | a grid of tiles cut from one picture (floors, walls, levels) | image, tileWidth, tileHeight, hframes, vframes, columns, rows, solid, solidTiles, tiles |
 | Camera | view centre | zoom |
 | Sound | sound player | file, volume, pitch, loop, autoplay |
 
@@ -61,6 +62,40 @@ Positions are in game units (project size, default 1280x720, y grows downward) a
 A **Button with an `action`** (`left`, `right`, `up`, `down`, `jump`, `action`) counts as that action while held: scripts read it with `isDown("left")` /
 `axis("left", "right")`. The keyboard (arrows/WASD, space, Z) feeds the same actions.
 **Body**: gravity pulls it down; a body that is `solid` and `static` is ground that other bodies stand on (`onGround()` becomes true).
+
+### TileMap: levels made of tiles
+
+A **TileMap** draws a `columns` x `rows` grid of square-ish tiles (`tileWidth` x `tileHeight` game units each). Its `x`, `y` is the **centre** of the whole map.
+The tiles come from one picture: import a tileset image, choose it as the map's `image`, and set `hframes` / `vframes` to the number of tiles across and down.
+Tile numbers start at 1 at the top left and go left to right, top to bottom (the same numbering as sprite sheet frames); **0 is an empty cell**.
+Without an image each tile number shows as a coloured square, so you can lay out a level before any art exists.
+
+**Painting.** Select the TileMap and tap **Paint tiles** in the inspector. The scene view then has a tile bar: pick a tile, then use **paint** (drag a finger to paint),
+**erase**, or **fill** (tap to flood an open area). Two fingers still pan and zoom. Each stroke is one undo step. Tap **Done** to go back to moving nodes.
+
+**Collisions.** With `solid` on, bodies (Body, SpawnableBody) stop against painted tiles: they land on them (`onGround()` becomes true), bump into walls and hit their heads on ceilings.
+Leave `solidTiles` empty to make every painted tile solid, or list the tile numbers that are (`1, 2, 7`), so decoration tiles (grass, signs) can be walked through.
+A body touching a solid tile sends `collided(map)` once, with the TileMap as `other`. A map with `solid` off is scenery only.
+
+**From a script** (columns and rows count from 1):
+
+```
+script Level of TileMap:
+	fn onReady():
+		# dig a hole in the floor and put a coin above it
+		clearTile(5, 12)
+		var spot = cellCenter(5, 10)
+		log(f"coin goes at {spot.x}, {spot.y}")
+
+	fn onEvery(1):
+		# turn a random-looking tile into a wall
+		setTile(3, 4, 2)
+```
+
+`tileAt(col, row)`, `setTile(col, row, tile)`, `clearTile(col, row)`, `fillTiles(tile)`, `columns()`, `rows()`, `tileWidth()`, `tileHeight()`, `setSolid(b)`,
+`colAt(worldX)` / `rowAt(worldY)` (which cell a position is in; below 1 or above `columns()` / `rows()` means outside), `tileAtPoint(worldX, worldY)` and `cellCenter(col, row)`.
+For example a hero can ask `tileAtPoint(x(), y() + 40.0)` what is under its feet. Cells outside the map read as 0 and writes to them are ignored.
+A TileMap is not moved by its parent's rotation or scale (like every node, only x and y add up). Maps of up to 1,000,000 cells work; only the visible part is drawn.
 
 ### SpawnableBody: bullets, enemies, pickups
 
@@ -158,6 +193,7 @@ Buttons are touchable), `collided(other)` (Body), `freed` (every node). Handlers
 Node2D: `x() y() position() setPosition(x,y) moveBy(dx,dy) rotation() setRotation(d) turnBy(d) setScale(s) setVisible(b) setLayer(n) setTouchable(b)`.
 Sprite: `setImage(file) setFlipX(b) animate("clip") stopAnimating() setAnimSpeed(x) setFrame(n)`. Sound: `start() stop() setVolume(v) setPitch(p) setLoop(b)`. Shape: `setColor("#RRGGBB") setSize(w,h)`. Label: `setText(x) setColor() setFontSize()`.
 Body: `velocity() setVelocity(vx,vy) push(dvx,dvy) setGravity(g) onGround()`. Camera: `setZoom(z)`.
+TileMap: `tileAt(c, r) setTile(c, r, n) clearTile(c, r) fillTiles(n) columns() rows() tileWidth() tileHeight() setSolid(b) colAt(wx) rowAt(wy) tileAtPoint(wx, wy) cellCenter(c, r)`.
 SpawnableBody (a Body): `lifetime() setLifetime(s) age() health() maxHealth() setHealth(n) setMaxHealth(n) hurt(n) heal(n) die() isDead() damage() setDamage(n) dealDamage(other) launch(angle, speed) launchAt(node, speed) angleTo(x, y) chase(node, speed)`.
 Every script: `spawnBody(scene, parent, x, y) spawnBurst(scene, parent, x, y, count, speed) spawnRing(scene, parent, x, y, count, radius) countTagged("tag") nearest("tag", x, y)`.
 The full list is `api/nebula.sn` (plain SuperNova: read it). Every Nebula syntax form is explained in `docs/SYNTAX.md`.

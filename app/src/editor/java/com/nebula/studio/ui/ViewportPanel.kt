@@ -67,9 +67,11 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize().pointerInput(studio.scenePath, studio.snap) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                val target = hit(down.position)
+                val paintNode = studio.paintNode()          // while painting tiles one finger paints and two fingers pan/zoom
+                val target = if (paintNode != null) null else hit(down.position)
                 if (target != null) studio.select(target.node)
-                var moved = 0f; var transforming = false; var dragging = false
+                var moved = 0f; var transforming = false; var dragging = false; var stroke = false
+                fun paintAt(p: Offset) { val w = toWorld(p); if (paintNode != null) studio.paintTile(paintNode, w.x.toDouble(), w.y.toDouble()) }
                 var rawX = target?.node?.f("x") ?: 0.0; var rawY = target?.node?.f("y") ?: 0.0
                 do {
                     val ev = awaitPointerEvent()
@@ -85,7 +87,14 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
                     } else if (pressed.size == 1 && !transforming) {
                         val d = pressed[0].positionChange()
                         moved += d.getDistance()
-                        if (moved > 10f) {
+                        if (paintNode != null) {
+                            // painting starts once the finger really moves (so the first finger of a two-finger pan never paints)
+                            if (moved > 10f && studio.tileTool != "fill") {
+                                if (!stroke) { stroke = true; studio.beginTileStroke(); paintAt(down.position) }
+                                paintAt(pressed[0].position)
+                                pressed[0].consume()
+                            }
+                        } else if (moved > 10f) {
                             val node = target?.node
                             if (node != null && studio.selected()?.id == node.id) {
                                 if (!dragging) { dragging = true; studio.editor?.beginDrag() }
@@ -99,7 +108,8 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
                         }
                     }
                 } while (ev.changes.any { it.pressed })
-                if (moved <= 10f && !transforming && target == null) studio.select(null)
+                if (paintNode != null && moved <= 10f && !transforming) { studio.beginTileStroke(); paintAt(down.position) }   // a tap paints / erases / fills one spot
+                if (paintNode == null && moved <= 10f && !transforming && target == null) studio.select(null)
             }
         }) {
             val z = if (zoom == 0f) 1f else zoom
@@ -138,6 +148,7 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
             IconBtn(Icons.Default.GridOn, "Toggle grid", { studio.showGrid = !studio.showGrid; studio.setSetting("grid", studio.showGrid.toString()) }, tint = if (studio.showGrid) C.accent2 else C.dim)
             IconBtn(Icons.Default.GridView, "Cycle snap", { studio.snap = when (studio.snap) { 0 -> 8; 8 -> 16; 16 -> 32; 32 -> 64; else -> 0 }; studio.setSetting("snap", studio.snap.toString()) }, tint = if (studio.snap > 0) C.accent2 else C.dim)
         }
+        studio.paintNode()?.let { TilePalette(studio, it, Modifier.align(Alignment.BottomCenter).padding(8.dp)) }
         Text("snap ${if (studio.snap > 0) studio.snap else "off"}  ·  ${(zoom * 100).toInt()}%", color = C.dim, fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
     }

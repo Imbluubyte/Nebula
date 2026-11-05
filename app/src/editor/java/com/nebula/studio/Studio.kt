@@ -113,6 +113,19 @@ class Studio(val ctx: Context) {
     var rev by mutableIntStateOf(0)                    // bumped on every scene change so panels recompose
     var selectedPath by mutableStateOf<String?>(null)
     val collapsed = mutableStateListOf<String>()
+
+    // ---- tile painting (a TileMap is painted straight in the scene view)
+    var paintPath by mutableStateOf<String?>(null)     // path of the TileMap being painted, null = not painting
+    var tileBrush by mutableIntStateOf(1)              // tile number the paint and fill tools use
+    var tileTool by mutableStateOf("paint")            // paint | erase | fill
+    fun paintNode(): SceneNode? { rev; val t = editor?.tree ?: return null; val p = paintPath ?: return null; val n = t.find(t.root ?: return null, p) ?: return null; return if (n.type == "TileMap") n else null }
+    fun beginTileStroke() { editor?.beginDrag() }       // one undo step per finger stroke
+    fun paintTile(n: SceneNode, wx: Double, wy: Double): Boolean {
+        val (c, r) = TileGrid.cellAt(n, wx, wy) ?: return false
+        val changed = TileGrid.apply(n, tileTool, c, r, tileBrush)
+        if (changed) rev++
+        return changed
+    }
     var scenePath by mutableStateOf<String?>(null)
 
     // ---- scripts
@@ -266,7 +279,7 @@ class Studio(val ctx: Context) {
     fun closeProject() {
         stop(); saveAll()
         preview?.release(); preview = null; animDoc = null
-        project = null; editor = null; scenePath = null; scripts.clear(); activeScript = null; selectedPath = null; lowered = null
+        project = null; editor = null; scenePath = null; scripts.clear(); activeScript = null; selectedPath = null; lowered = null; paintPath = null
         centerTab = CenterTab.Scene
     }
 

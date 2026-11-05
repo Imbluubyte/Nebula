@@ -44,6 +44,11 @@ object NodeTypes {
         NodeType("SpawnableBody", "Body", listOf(
             f("lifetime", 0.0, "seconds until it expires by itself, 0 = never"), f("health", 1.0), f("maxHealth", 1.0), f("damage", 1.0)),
             listOf(BcDef("expired"), BcDef("died"), BcDef("damaged", listOf("Float"))), "*"),
+        // A grid of tiles cut from one picture (see TileGrid). x, y is the centre of the map. `tiles` is edited with the tile painter.
+        NodeType("TileMap", "Node2D", listOf(s("image", "", "image"), f("tileWidth", 32.0), f("tileHeight", 32.0),
+            f("hframes", 1.0), f("vframes", 1.0), f("columns", 20.0), f("rows", 12.0),
+            b("solid", true), s("solidTiles", "", "which tile numbers are solid, like 1, 2, 7 (empty = every painted tile)"), s("tiles", "", "tiles")),
+            listOf(), "#"),
         NodeType("Camera", "Node2D", listOf(f("zoom", 1.0)), icon = "C"),
         NodeType("Sound", "Node", listOf(s("file", "", "sound"), f("volume", 1.0), f("pitch", 1.0), b("loop", false), b("autoplay", false)), icon = "A"),
     )

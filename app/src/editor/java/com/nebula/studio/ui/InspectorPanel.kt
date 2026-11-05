@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nebula.studio.CenterTab
 import com.nebula.studio.Modal
 import com.nebula.studio.Studio
 import com.nebula.studio.runtime.Renderer
@@ -72,7 +73,7 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
         }
         Kind.F -> Row(verticalAlignment = Alignment.CenterVertically) {
             Field(fmtNum(n.f(d.name)), { v -> v.toDoubleOrNull()?.let { x -> studio.change { it.setProp(n, d.name, x) } } }, Modifier.weight(1f), label = d.name, number = true)
-            val step = if (d.name == "rotation") 15.0 else if (d.name in listOf("scale", "zoom", "volume", "pitch", "speed")) 0.1 else if (d.name in listOf("frame", "hframes", "vframes")) 1.0 else 8.0
+            val step = if (d.name == "rotation") 15.0 else if (d.name in listOf("scale", "zoom", "volume", "pitch", "speed")) 0.1 else if (d.name in listOf("frame", "hframes", "vframes", "columns", "rows", "health", "maxHealth", "damage")) 1.0 else 8.0
             IconBtn(Icons.Default.Remove, "less", { studio.change { it.setProp(n, d.name, n.f(d.name) - step) } })
             IconBtn(Icons.Default.Add, "more", { studio.change { it.setProp(n, d.name, n.f(d.name) + step) } })
         }
@@ -113,6 +114,12 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
                         for (hex in swatches) Box(Modifier.size(28.dp).clip(CircleShape).background(Renderer.parseColor(hex, Color.White))
                             .clickable { studio.change { it.setProp(n, d.name, hex) } })
                     }
+                }
+                "tiles" -> {
+                    val painting = studio.paintPath == n.path()
+                    Text("tiles (painted in the scene view)", color = C.dim, fontSize = 11.sp)
+                    TextBtn(if (painting) "Stop painting" else "Paint tiles", { studio.paintPath = if (painting) null else n.path(); studio.centerTab = CenterTab.Scene }, Modifier.fillMaxWidth(), primary = !painting)
+                    TextBtn("Clear all tiles", { studio.change { it.setProp(n, d.name, "") } }, Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
                 "action" -> {
                     Field(n.s(d.name), { v -> studio.change { it.setProp(n, d.name, v.trim()) } }, label = "${d.name} (held while pressed, read with isDown / axis)", placeholder = "left, right, jump...")

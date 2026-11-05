@@ -9,6 +9,16 @@ class SceneNode(val id: Long, var name: String, val type: String) {
     val tags = LinkedHashSet<String>()
     var script: String? = null                      // path of the .nbs file attached to this node
     var instanceOf: String? = null                  // path of a .nscn this node was instanced from (editor only)
+    var tileCache: TileGrid? = null                 // TileMap only: the parsed `tiles` string (see TileGrid.of)
+    var tileSrc: String? = null
+    var tileDirty = false                           // the cache holds script edits the `tiles` string does not have yet
+
+    /** Position in game units: the sum of this node's and its Node2D ancestors' x and y. */
+    fun worldPos(): Pair<Double, Double> {
+        var x = 0.0; var y = 0.0; var c: SceneNode? = this
+        while (c != null) { if (NodeTypes.isA(c.type, "Node2D")) { x += c.f("x"); y += c.f("y") }; c = c.parent }
+        return x to y
+    }
 
     fun path(): String {
         val parts = ArrayList<String>()

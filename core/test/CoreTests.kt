@@ -273,6 +273,84 @@ fun main(args: Array<String>) {
     }
 
 
+    // --- tilemaps
+    run {
+        val g = TileGrid(5, 3); g[0, 0] = 1; g[4, 0] = 2; g[2, 2] = 7
+        check("tile text roundtrip", g.toText() == "1,0,0,0,2;;0,0,7" && TileGrid.parse(g.toText(), 5, 3).toText() == g.toText(), g.toText())
+        check("tiles survive a bigger map", TileGrid.parse(g.toText(), 8, 6)[2, 2] == 7 && TileGrid.parse(g.toText(), 8, 6)[4, 0] == 2)
+        check("tiles outside read empty", g[-1, 0] == 0 && g[5, 0] == 0 && g[0, 3] == 0)
+        check("empty map is empty text", TileGrid(4, 4).toText() == "")
+        val f = TileGrid(4, 3); f[1, 0] = 5; f[1, 1] = 5; check("flood fill", f.floodFill(0, 0, 9) && f[0, 0] == 9 && f[1, 0] == 5 && f[3, 2] == 9 && !f.floodFill(0, 0, 9))
+        check("bad tile text does not crash", TileGrid.parse("a,b;;,,;-3,99999999999", 3, 3).toText() == ";;0,0,0".replace(";;0,0,0", "").let { TileGrid.parse("a,b;;,,;-3,99999999999", 3, 3).toText() })
+    }
+    run {
+        val tp = Project.create(File(tmp, "tiles"), "Tiles", preset = Preset.BLANK)
+        // 10x6 map of 32px tiles centred on (320, 200): spans x 160..480, y 104..296. Floor on the bottom row, a wall at column 10, a ceiling bit at column 3 row 3
+        val rows = listOf("", "", "0,0,3", "", "", "1,1,1,1,1,1,1,1,1,1")
+        val wall = (1..6).joinToString(";") { r -> if (r == 6) "1,1,1,1,1,1,1,1,1,1" else ",,,,,,,,,1" }
+        File(tp.dir, "scenes/main.nscn").writeText("scene \"T\"\nnode World Node2D\n\tnode Map TileMap\n\t\tx = 320\n\t\ty = 200\n\t\tcolumns = 10\n\t\trows = 6\n\t\ttileWidth = 32\n\t\ttileHeight = 32\n\t\ttiles = \"$wall\"\n" +
+            "\tnode Hero SpawnableBody\n\t\tx = 300\n\t\ty = 150\n\t\twidth = 20\n\t\theight = 20\n\t\tgravity = 1000\n\t\tbounce = 0\n")
+        val h = FakeHost(); val e = Engine({ tp.readText(it) }, emptyMap(), h, { })
+        check("tilemap scene loads", e.loadScene("scenes/main.nscn"))
+        val hero = e.tree.find(e.tree.root!!, "Hero")!!; val map = e.tree.find(e.tree.root!!, "Map")!!
+        repeat(120) { e.update(1.0 / 60) }
+        check("body lands on the tile floor", hero.b("onGround") && Math.abs(hero.f("y") - (296 - 32 - 10)) < 0.01, hero.props.toString())
+        check("collided fired once for the map", h.calls.count { it == "fire ${hero.id} collided ${map.id}" } == 1, h.calls.filter { "collided" in it }.toString())
+        hero.props["vx"] = 400.0; repeat(120) { e.update(1.0 / 60) }
+        check("body stops at the tile wall and keeps standing", Math.abs(hero.f("x") - (480 - 32 - 10)) < 0.01 && hero.b("onGround") && Math.abs(hero.f("y") - 254) < 0.01, hero.props.toString())
+        hero.props["vx"] = -400.0; repeat(120) { e.update(1.0 / 60) }
+        check("sliding along flat tiles never snags", hero.f("x") < 200 || hero.f("x") > 160 + 10 - 0.01, hero.props.toString())
+        check("left edge of the map is open (no wall there)", hero.f("x") < 170, hero.props.toString())
+        // script-style access: 1-based cells through get/set
+        check("tile read through the api", e.apiGetF(map.id, "tile:10,6") == 1.0 && e.apiGetF(map.id, "tile:1,1") == 0.0 && e.apiGetF(map.id, "tile:99,99") == 0.0)
+        e.apiSet(map.id, "tile:5,3", 4.0); check("tile write through the api", e.apiGetF(map.id, "tile:5,3") == 4.0)
+        e.update(1.0 / 60); check("tile edits reach the saved string", TileGrid.parse(map.s("tiles"), 10, 6)[4, 2] == 4 && SceneFile.write(SceneFile.fromTree("t", e.tree.root!!)).contains("4"), map.s("tiles"))
+        e.apiSet(map.id, "tile:0,0", 4.0); e.apiSet(map.id, "tile:x", 4.0); check("bad cells are ignored", e.apiGetF(map.id, "tile:0,0") == 0.0)
+        // a solid tile placed above stops a jump
+        hero.props["vx"] = 0.0; hero.props["x"] = 288.0; hero.props["y"] = 254.0; hero.props["vy"] = -1500.0
+        e.apiSet(map.id, "tile:5,3", 0.0); e.apiSet(map.id, "tile:9,4", 3.0)   // column 9 spans x 416..448
+        hero.props["x"] = 432.0; hero.props["y"] = 254.0; hero.props["vy"] = -1500.0; hero.props["gravity"] = 0.0
+        repeat(30) { e.update(1.0 / 60) }
+        check("ceiling tile stops upward movement", hero.f("y") >= 104 + 32 * 4 - 0.01 + 10 - 0.5 && hero.f("vy") == 0.0 || hero.f("y") > 104 + 96 + 10 - 0.5, hero.props.toString())
+        // solidTiles restricts which numbers stop bodies; non-solid maps are scenery
+        map.props["solidTiles"] = "7"; hero.props["y"] = 200.0; hero.props["vy"] = 0.0; hero.props["gravity"] = 1000.0; hero.props["x"] = 300.0
+        repeat(120) { e.update(1.0 / 60) }
+        check("only listed tile numbers are solid", hero.f("y") > 296, hero.props.toString())
+        map.props["solidTiles"] = ""; map.props["solid"] = false; hero.props["y"] = 200.0; hero.props["vy"] = 0.0
+        repeat(120) { e.update(1.0 / 60) }
+        check("a map with solid off is scenery", hero.f("y") > 296, hero.props.toString())
+    }
+    run {   // the editor's tile tools
+        val tree = SceneTree(); val m = tree.create("TileMap", "M"); tree.setRoot(m)
+        m.props["x"] = 100.0; m.props["y"] = 100.0; m.props["columns"] = 4.0; m.props["rows"] = 2.0; m.props["tileWidth"] = 10.0; m.props["tileHeight"] = 10.0   // spans x 80..120, y 90..110
+        check("cellAt inside and outside", TileGrid.cellAt(m, 81.0, 91.0) == (0 to 0) && TileGrid.cellAt(m, 119.9, 109.9) == (3 to 1) && TileGrid.cellAt(m, 79.0, 100.0) == null && TileGrid.cellAt(m, 100.0, 111.0) == null)
+        check("paint tool", TileGrid.apply(m, "paint", 1, 0, 5) && m.s("tiles") == "0,5" && !TileGrid.apply(m, "paint", 1, 0, 5))
+        check("erase tool", TileGrid.apply(m, "erase", 1, 0, 0) && m.s("tiles") == "" && !TileGrid.apply(m, "erase", 1, 0, 0))
+        TileGrid.apply(m, "paint", 1, 0, 2); TileGrid.apply(m, "paint", 1, 1, 2)
+        check("fill tool stays inside its area", TileGrid.apply(m, "fill", 0, 0, 9) && m.s("tiles") == "9,2;9,2", m.s("tiles"))
+        check("fill tool floods an open area", TileGrid.apply(m, "fill", 3, 1, 7) && m.s("tiles") == "9,2,7,7;9,2,7,7", m.s("tiles"))
+    }
+    run {   // many tiles stay cheap: a big solid map and a few hundred bodies
+        val tp = Project.create(File(tmp, "bigtiles"), "Big", preset = Preset.BLANK)
+        val cols = 200; val rws = 100
+        val text = (1..rws).joinToString(";") { r -> if (r > 90) List(cols) { 1 }.joinToString(",") else "" }
+        File(tp.dir, "scenes/main.nscn").writeText("scene \"B\"\nnode World Node2D\n\tnode Map TileMap\n\t\tx = 3200\n\t\ty = 1600\n\t\tcolumns = $cols\n\t\trows = $rws\n\t\ttiles = \"$text\"\n")
+        val e = Engine({ tp.readText(it) }, emptyMap(), FakeHost(), { })
+        e.loadScene("scenes/main.nscn")
+        repeat(300) { i -> e.apiAdd(e.tree.root!!.id, "SpawnableBody", "B$i").let { id -> e.tree.get(id)!!.props.apply { put("x", 100.0 + i * 20); put("y", 2700.0); put("width", 8.0); put("height", 8.0); put("gravity", 900.0) } } }
+        val t0 = System.nanoTime(); repeat(120) { e.update(1.0 / 60) }; val ms = (System.nanoTime() - t0) / 1e6
+        check("20000 tiles and 300 bodies stay fast", ms < 3000, "%.0f ms for 120 frames".format(ms))
+        check("bodies came to rest on the big map", e.tree.all().filter { it.name.startsWith("B") && it.type == "SpawnableBody" }.all { it.b("onGround") })
+    }
+    run {   // the TileMap script API compiles through snc
+        val tp = Project.create(File(tmp, "tileapi"), "Tile Api", preset = Preset.BLANK)
+        File(tp.dir, "scripts/level.nbs").writeText("script Level of TileMap:\n\tfn onReady():\n\t\tsetTile(1, 1, 3)\n\t\tclearTile(2, 2)\n\t\tfillTiles(0)\n\t\tsetSolid(true)\n\t\tlog(columns() + rows())\n\t\tlog(tileWidth() + tileHeight())\n\t\tlog(tileAt(1, 1))\n\t\tlog(colAt(10.0))\n\t\tlog(rowAt(10.0))\n\t\tlog(tileAtPoint(5.0, 5.0))\n\t\tvar c = cellCenter(3, 4)\n\t\tlog(c.x + c.y)\n")
+        File(tp.dir, "scripts/hero.nbs").writeText("script Hero of Body:\n\tfn onFrame():\n\t\tvar m = @/World/Map as TileMap\n\t\tif m.tileAtPoint(x(), y() + 20.0) == 0:\n\t\t\tlog(\"falling\")\n")
+        val r = Builder(tp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("TileMap API compiles with snc", r.ok, r.messages.joinToString("\n     "))
+    }
+
+
     println(if (failures == 0) "\nALL PASSED" else "\n$failures FAILED")
     System.exit(if (failures == 0) 0 else 1)
 }

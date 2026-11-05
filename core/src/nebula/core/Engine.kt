@@ -58,6 +58,7 @@ class Engine(
     }
     private val sched = LinkedHashMap<Long, Sched>()
     private val touching = HashSet<Long>()
+    private val tileTouching = HashSet<Long>()
     private val pendingFree = LinkedHashSet<Long>()
     private class AnimState(var set: String, var clip: String, var time: Double, var done: Boolean)
     private val animStates = HashMap<Long, AnimState>()
@@ -135,7 +136,7 @@ class Engine(
         for (n in tree.all().asReversed()) { host?.freed(n.id) }
         check()
         for (n in tree.all()) if (n.type == "Sound") soundCtl(SoundCmd(n.id, n.s("file"), 0.0, 1.0, false, true))
-        sched.clear(); touching.clear(); pendingFree.clear(); animStates.clear(); pendingScene = null
+        sched.clear(); touching.clear(); tileTouching.clear(); pendingFree.clear(); animStates.clear(); pendingScene = null
         tree.root?.let { tree.remove(it) }
     }
 
@@ -176,6 +177,7 @@ class Engine(
     }
 
     private fun flush() {
+        for (n in tree.all()) if (n.tileDirty) TileGrid.sync(n)
         if (pendingFree.isNotEmpty()) {
             val ids = pendingFree.toList(); pendingFree.clear()
             for (id in ids) tree.get(id)?.let { doFree(it) }
@@ -231,11 +233,7 @@ class Engine(
     }
 
     // ------------------------------------------------------------ geometry, hit-testing, physics
-    fun worldPos(n: SceneNode): Pair<Double, Double> {
-        var x = 0.0; var y = 0.0; var c: SceneNode? = n
-        while (c != null) { if (NodeTypes.isA(c.type, "Node2D")) { x += c.f("x"); y += c.f("y") }; c = c.parent }
-        return x to y
-    }
+    fun worldPos(n: SceneNode): Pair<Double, Double> = n.worldPos()
 
     fun sizeOf(n: SceneNode): Pair<Double, Double> {
         val w = n.f("width"); val h = n.f("height")
@@ -281,14 +279,21 @@ class Engine(
     }
 
     private fun physics(dt: Double) {
-        val bodies = tree.all().filter { it.type in NodeTypes.bodyTypes }
+        val all = tree.all()
+        val bodies = all.filter { it.type in NodeTypes.bodyTypes }
+        val maps = all.filter { it.type == "TileMap" && it.b("solid") }.map { TileSolid(it) }
+        val tileContacts = HashSet<Long>()
         for (b in bodies) {
             b.props["onGround"] = false
             if (b.b("static")) continue
             b.props["vy"] = b.f("vy") + b.f("gravity") * dt
             b.props["x"] = b.f("x") + b.f("vx") * dt
+            if (maps.isNotEmpty()) tileCollide(b, maps, true, tileContacts)       // each axis on its own, so bodies slide along flat tiles without snagging
             b.props["y"] = b.f("y") + b.f("vy") * dt
+            if (maps.isNotEmpty()) tileCollide(b, maps, false, tileContacts)
         }
+        for (key in tileContacts) if (key !in tileTouching) { host?.fire(key / 1_000_000L, "collided", 0.0, 0.0, key % 1_000_000L); check() }
+        tileTouching.retainAll(tileContacts); tileTouching.addAll(tileContacts)
         // world positions are looked up once per frame (not once per pair) so hundreds of bodies stay cheap
         val n = bodies.size
         val wx = DoubleArray(n); val wy = DoubleArray(n)
@@ -313,6 +318,47 @@ class Engine(
             else if (aSolid && !b.b("static")) { resolve(b, -dx, -dy, ox, oy); worldPos(b).let { wx[j] = it.first; wy[j] = it.second } }
         }
         touching.retainAll(overlapping); touching.addAll(overlapping)
+    }
+
+    /** A solid TileMap seen by the physics step: where its cells are in the world and which of them stop bodies. */
+    private class TileSolid(val node: SceneNode) {
+        val grid = TileGrid.of(node)
+        val tw = node.f("tileWidth").coerceAtLeast(1.0); val th = node.f("tileHeight").coerceAtLeast(1.0)
+        val left: Double; val top: Double
+        val only = TileGrid.solidSet(node)
+        init { val (x, y) = node.worldPos(); left = x - grid.cols * tw / 2; top = y - grid.rows * th / 2 }
+        fun solidAt(c: Int, r: Int): Boolean { val t = grid[c, r]; return t != 0 && (only == null || t in only) }
+    }
+
+    /** Pushes body [b] out of solid tiles along one axis (the other axis was not moved yet, so a body on flat ground never snags a seam). */
+    private fun tileCollide(b: SceneNode, maps: List<TileSolid>, horizontal: Boolean, contacts: MutableSet<Long>) {
+        val eps = 1e-3                                  // touching is not overlapping; keeps a resting body from being shoved sideways
+        val bounce = b.f("bounce"); val hw = b.f("width") / 2; val hh = b.f("height") / 2
+        for (m in maps) {
+            val (wx, wy) = b.worldPos()
+            var x = wx; var y = wy
+            val c0 = Math.floor((x - hw - m.left) / m.tw).toInt().coerceAtLeast(0); val c1 = Math.floor((x + hw - m.left - eps) / m.tw).toInt().coerceAtMost(m.grid.cols - 1)
+            val r0 = Math.floor((y - hh - m.top) / m.th).toInt().coerceAtLeast(0); val r1 = Math.floor((y + hh - m.top - eps) / m.th).toInt().coerceAtMost(m.grid.rows - 1)
+            var hit = false
+            for (r in r0..r1) for (c in c0..c1) {
+                if (!m.solidAt(c, r)) continue
+                val cl = m.left + c * m.tw; val ct = m.top + r * m.th; val cr = cl + m.tw; val cb = ct + m.th
+                if (x + hw <= cl + eps || x - hw >= cr - eps || y + hh <= ct + eps || y - hh >= cb - eps) continue
+                hit = true
+                if (horizontal) {
+                    val vx = b.f("vx")
+                    val shift = if (vx > 0 || (vx == 0.0 && x < (cl + cr) / 2)) cl - (x + hw) else cr - (x - hw)
+                    x += shift; b.props["x"] = b.f("x") + shift
+                    if (vx != 0.0) b.props["vx"] = -vx * bounce
+                } else {
+                    val vy = b.f("vy"); val down = vy > 0 || (vy == 0.0 && y < (ct + cb) / 2)
+                    val shift = if (down) ct - (y + hh) else cb - (y - hh)
+                    y += shift; b.props["y"] = b.f("y") + shift
+                    if (down) { b.props["onGround"] = true; if (vy > 0) b.props["vy"] = -vy * bounce } else if (vy < 0) b.props["vy"] = 0.0
+                }
+            }
+            if (hit) contacts.add(b.id * 1_000_000L + m.node.id)
+        }
     }
 
     private fun resolve(d: SceneNode, dx: Double, dy: Double, ox: Double, oy: Double) {
@@ -346,14 +392,28 @@ class Engine(
     fun apiAlive(id: Long) = tree.alive(id) && id !in pendingFree
     fun apiHas(id: Long, prop: String): Boolean = tree.get(id)?.let { if (prop.startsWith("tweak:")) it.tweaks.containsKey(prop.substring(6)) else it.props.containsKey(prop) } ?: false
 
-    private fun slot(n: SceneNode, prop: String): Any? = if (prop.startsWith("tweak:")) n.tweaks[prop.substring(6)] else if (prop == "name") n.name else n.props[prop]
+    /** "tile:col,row" (1-based) addresses one cell of a TileMap through the ordinary get/set calls. */
+    private fun tileCell(prop: String): Pair<Int, Int>? {
+        val p = prop.substring(5).split(',')
+        if (p.size != 2) return null
+        return (p[0].trim().toIntOrNull() ?: return null) - 1 to (p[1].trim().toIntOrNull() ?: return null) - 1
+    }
+    private fun slot(n: SceneNode, prop: String): Any? =
+        if (prop.startsWith("tweak:")) n.tweaks[prop.substring(6)]
+        else if (prop == "name") n.name
+        else if (prop.startsWith("tile:")) { if (n.type == "TileMap") tileCell(prop)?.let { TileGrid.of(n)[it.first, it.second] } else null }
+        else n.props[prop]
     fun apiGetF(id: Long, prop: String): Double = (tree.get(id)?.let { slot(it, prop) } as? Number)?.toDouble() ?: 0.0
-    fun apiGetS(id: Long, prop: String): String = tree.get(id)?.let { slot(it, prop) }?.toString() ?: ""
+    fun apiGetS(id: Long, prop: String): String = tree.get(id)?.let { if (prop == "tiles") TileGrid.sync(it); slot(it, prop) }?.toString() ?: ""
     fun apiGetB(id: Long, prop: String): Boolean = tree.get(id)?.let { slot(it, prop) } as? Boolean ?: false
     fun apiSet(id: Long, prop: String, value: Any) {
         val n = tree.get(id) ?: return
         when {
             prop == "name" -> n.name = value.toString()
+            prop.startsWith("tile:") -> { if (n.type == "TileMap") tileCell(prop)?.let { (c, r) ->
+                val g = TileGrid.of(n); val v = ((value as? Number)?.toInt() ?: 0).coerceAtLeast(0)
+                if (c in 0 until g.cols && r in 0 until g.rows && g[c, r] != v) { g[c, r] = v; n.tileDirty = true }
+            } }
             prop.startsWith("tweak:") -> n.tweaks[prop.substring(6)] = value
             else -> n.props[prop] = value
         }

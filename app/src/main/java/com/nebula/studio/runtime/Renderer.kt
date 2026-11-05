@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.IntSize
 import nebula.core.NodeTypes
 import nebula.core.SceneNode
 import nebula.core.SceneTree
+import nebula.core.TileGrid
 
 /** One node ready to draw: its world position and drawing order. */
 class DrawItem(val node: SceneNode, val x: Double, val y: Double, val order: Int)
@@ -71,6 +72,7 @@ object Renderer {
                 w * s to h * s
             }
             "Shape", "Button", "Body", "SpawnableBody" -> n.f("width") * s to n.f("height") * s
+            "TileMap" -> TileGrid.of(n).let { it.cols * n.f("tileWidth").coerceAtLeast(1.0) to it.rows * n.f("tileHeight").coerceAtLeast(1.0) }
             "Label" -> (n.s("text").length * n.f("fontSize") * 0.55).coerceAtLeast(24.0) * s to n.f("fontSize") * 1.3 * s
             else -> 40.0 to 40.0
         }
@@ -111,6 +113,7 @@ object Renderer {
                         drawRect(Color(0x99FFFFFF), Offset((cx - w / 2).toFloat(), (cy - h / 2).toFloat()), Size(w.toFloat(), h.toFloat()), style = Stroke(2f))
                     }
                 }
+                "TileMap" -> drawTiles(n, images, cx, cy, editor)
                 "Label" -> text(n.s("text"), cx, cy, (n.f("fontSize") * s).toFloat(), parseColor(n.s("color"), Color.White), true)
                 "Button" -> {
                     val w = (n.f("width") * s).toFloat(); val h = (n.f("height") * s).toFloat()
@@ -123,6 +126,40 @@ object Renderer {
                     drawLine(Color(0xAAB388FF), Offset(cx, cy - 16), Offset(cx, cy + 16), 2f)
                 }
             }
+        }
+    }
+
+    /** A flat colour for a tile when the map has no picture (or the picture is missing), so maps work before any art exists. */
+    fun tileColor(tile: Int): Color = Color.hsv(((tile * 47) % 360).toFloat(), 0.45f, 0.85f)
+
+    /** Draws only the cells inside the visible area, so a big map costs about as much as a screenful. */
+    private fun DrawScope.drawTiles(n: SceneNode, images: ImageCache?, cx: Float, cy: Float, editor: Boolean) {
+        val g = TileGrid.of(n)
+        val tw = n.f("tileWidth").coerceAtLeast(1.0).toFloat(); val th = n.f("tileHeight").coerceAtLeast(1.0).toFloat()
+        val left = cx - g.cols * tw / 2f; val top = cy - g.rows * th / 2f
+        val bmp = images?.get(n.s("image"))
+        val hc = n.f("hframes").toInt().coerceAtLeast(1); val vc = n.f("vframes").toInt().coerceAtLeast(1)
+        val clip = drawContext.canvas.nativeCanvas.clipBounds
+        val c0 = Math.floor(((clip.left - left) / tw).toDouble()).toInt().coerceAtLeast(0)
+        val c1 = Math.floor(((clip.right - left) / tw).toDouble()).toInt().coerceAtMost(g.cols - 1)
+        val r0 = Math.floor(((clip.top - top) / th).toDouble()).toInt().coerceAtLeast(0)
+        val r1 = Math.floor(((clip.bottom - top) / th).toDouble()).toInt().coerceAtMost(g.rows - 1)
+        val cw = if (bmp != null) (bmp.width / hc).coerceAtLeast(1) else 1; val ch = if (bmp != null) (bmp.height / vc).coerceAtLeast(1) else 1
+        for (r in r0..r1) for (c in c0..c1) {
+            val t = g[c, r]; if (t == 0) continue
+            val x0 = Math.round(left + c * tw); val y0 = Math.round(top + r * th)
+            val x1 = Math.round(left + (c + 1) * tw); val y1 = Math.round(top + (r + 1) * th)
+            val idx = t - 1
+            if (bmp != null && idx < hc * vc) {
+                drawImage(bmp, srcOffset = androidx.compose.ui.unit.IntOffset((idx % hc) * cw, (idx / hc) * ch), srcSize = IntSize(cw, ch),
+                    dstOffset = androidx.compose.ui.unit.IntOffset(x0, y0), dstSize = IntSize(x1 - x0, y1 - y0))
+            } else drawRect(tileColor(t), Offset(x0.toFloat(), y0.toFloat()), Size((x1 - x0).toFloat(), (y1 - y0).toFloat()))
+        }
+        if (editor) {   // outline of the map and a faint cell grid, so an empty map can still be found and painted
+            val gridColor = Color(0x16FFFFFF)
+            for (c in c0..c1 + 1) drawLine(gridColor, Offset(left + c * tw, top), Offset(left + c * tw, top + g.rows * th), 1f)
+            for (r in r0..r1 + 1) drawLine(gridColor, Offset(left, top + r * th), Offset(left + g.cols * tw, top + r * th), 1f)
+            drawRect(Color(0x66B388FF), Offset(left, top), Size(g.cols * tw, g.rows * th), style = Stroke(2f))
         }
     }
 

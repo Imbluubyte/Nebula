@@ -47,6 +47,7 @@ var labels: Dict[Int, Label] = {}
 var buttons: Dict[Int, Button] = {}
 var bodies: Dict[Int, Body] = {}
 var spawnables: Dict[Int, SpawnableBody] = {}
+var tilemaps: Dict[Int, TileMap] = {}
 var cameras: Dict[Int, Camera] = {}
 var sounds: Dict[Int, Sound] = {}
 
@@ -481,6 +482,43 @@ class SpawnableBody extends Body:
 			nb_set_f(id, "vx", dx / d * speed)
 			nb_set_f(id, "vy", dy / d * speed)
 
+# A grid of tiles cut from one picture. Tile 0 is empty, 1.. count the picture's cells left to right, top to bottom.
+# Columns and rows are numbered from 1. Changes show immediately and (if the map is solid) stop bodies right away.
+class TileMap extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		tilemaps[id] = self
+	fn columns() -> Int:
+		return int(nb_get_f(id, "columns"))
+	fn rows() -> Int:
+		return int(nb_get_f(id, "rows"))
+	fn tileWidth() -> Float:
+		return nb_get_f(id, "tileWidth")
+	fn tileHeight() -> Float:
+		return nb_get_f(id, "tileHeight")
+	fn tileAt(col: Int, row: Int) -> Int:
+		return int(nb_get_f(id, f"tile:{col},{row}"))
+	fn setTile(col: Int, row: Int, tile: Int):
+		nb_set_f(id, f"tile:{col},{row}", tile * 1.0)
+	fn clearTile(col: Int, row: Int):
+		nb_set_f(id, f"tile:{col},{row}", 0.0)
+	fn fillTiles(tile: Int):
+		for r in 1..rows():
+			for c in 1..columns():
+				nb_set_f(id, f"tile:{c},{r}", tile * 1.0)
+	fn setSolid(value: Bool):
+		nb_set_b(id, "solid", value)
+	# world position (game units) -> column / row. Outside the map the number is below 1 or above columns() / rows().
+	fn colAt(wx: Float) -> Int:
+		return math.floor((wx - (nb_get_f(id, "x") - columns() * tileWidth() / 2.0)) / tileWidth()) + 1
+	fn rowAt(wy: Float) -> Int:
+		return math.floor((wy - (nb_get_f(id, "y") - rows() * tileHeight() / 2.0)) / tileHeight()) + 1
+	fn tileAtPoint(wx: Float, wy: Float) -> Int:
+		return tileAt(colAt(wx), rowAt(wy))
+	# centre of a cell in game units, handy for placing a coin or an enemy on a tile
+	fn cellCenter(col: Int, row: Int) -> Vec2:
+		return Vec2(nb_get_f(id, "x") - columns() * tileWidth() / 2.0 + (col - 0.5) * tileWidth(), nb_get_f(id, "y") - rows() * tileHeight() / 2.0 + (row - 0.5) * tileHeight())
+
 class Camera extends Node2D:
 	fn onCreation(id: Int):
 		super.onCreation(id)
@@ -524,6 +562,8 @@ fn wrap(id: Int) -> Node:
 			return Body(id)
 		case "SpawnableBody":
 			return SpawnableBody(id)
+		case "TileMap":
+			return TileMap(id)
 		case "Camera":
 			return Camera(id)
 		case "Sound":
@@ -586,6 +626,11 @@ fn asSpawnableBody(n: Node) -> SpawnableBody:
 	if r == null:
 		throw f"node '{n.name()}' is a {n.kind()}, not a SpawnableBody"
 	return r
+fn asTileMap(n: Node) -> TileMap:
+	var r = tilemaps.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a TileMap"
+	return r
 fn asCamera(n: Node) -> Camera:
 	var r = cameras.get(n.id)
 	if r == null:
@@ -635,5 +680,6 @@ fn nbFreed(id: Int):
 		buttons.remove(id)
 		bodies.remove(id)
 		spawnables.remove(id)
+		tilemaps.remove(id)
 		cameras.remove(id)
 		sounds.remove(id)

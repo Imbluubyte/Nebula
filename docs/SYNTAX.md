@@ -125,6 +125,12 @@ Frames of a sheet are numbered from 1, left to right then top to bottom.
 `start()` plays the node's sound (with its volume, pitch and loop), `stop()` stops it, `setFile(file) setVolume(0..1) setPitch(0.5..2) setLoop(b)`.
 Set `autoplay` in the inspector to start it when the scene starts.
 
+### TileMap
+A grid of tiles. Properties `image tileWidth tileHeight hframes vframes columns rows solid solidTiles tiles`; `tiles` is stored as rows joined by `;` and cells by `,` (`1,1,1;;0,2`), trailing empties left out, and is normally written by the tile painter.
+`columns() rows() tileWidth() tileHeight() tileAt(col, row) -> Int setTile(col, row, tile) clearTile(col, row) fillTiles(tile) setSolid(b)`,
+`colAt(worldX) -> Int rowAt(worldY) -> Int tileAtPoint(worldX, worldY) -> Int cellCenter(col, row) -> Vec2`. Columns and rows count from 1; tile 0 is empty.
+A solid TileMap stops every Body type; it sends `collided(map)` to a body when it first touches it.
+
 ### SpawnableBody
 A Body (so everything below Body applies) made to be spawned many times. Properties `lifetime health maxHealth damage`.
 `lifetime() setLifetime(s) age() health() maxHealth() setHealth(n) setMaxHealth(n) hurt(n) heal(n) die() isDead() damage() setDamage(n) dealDamage(other) -> Bool`.
@@ -150,6 +156,7 @@ Camera: `setZoom(z)`.
 | Button | `text width height fontSize color action` |
 | Body | `vx vy gravity width height solid static bounce color` |
 | SpawnableBody | everything of Body, plus `lifetime health maxHealth damage` |
+| TileMap | `image tileWidth tileHeight hframes vframes columns rows solid solidTiles tiles` |
 | Camera | `zoom` |
 | Sound | `file volume pitch loop autoplay` |
 
