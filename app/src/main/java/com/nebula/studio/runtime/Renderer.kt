@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntSize
+import nebula.core.Bars
 import nebula.core.NodeTypes
 import nebula.core.SceneNode
 import nebula.core.SceneTree
@@ -72,6 +73,7 @@ object Renderer {
                 w * s to h * s
             }
             "Shape", "Button", "Body", "SpawnableBody" -> n.f("width") * s to n.f("height") * s
+            "DynamicBar" -> (Bars.emptySprite(n) ?: Bars.fullSprite(n))?.let { sizeOf(it, images) } ?: (40.0 to 40.0)    // as big as its empty bar
             "CollisionBox" -> n.f("width") to n.f("height")          // the engine ignores scale on hitboxes
             "TileMap" -> TileGrid.of(n).let { it.cols * n.f("tileWidth").coerceAtLeast(1.0) to it.rows * n.f("tileHeight").coerceAtLeast(1.0) }
             "Label" -> (n.s("text").length * n.f("fontSize") * 0.55).coerceAtLeast(24.0) * s to n.f("fontSize") * 1.3 * s
@@ -102,18 +104,35 @@ object Renderer {
                     val (w, h) = sizeOf(n, images)
                     val v = spriteView(n, images, editor)
                     val bmp = images?.get(v.image)
+                    // the full-bar sprite of a DynamicBar is cut down to the bar's value, growing from one side
+                    val fill = Bars.fillOf(n)
+                    val r = fill?.first ?: 1.0
+                    val dir = fill?.second ?: "right"
+                    var fx = 0.0; var fy = 0.0; var fw = w; var fh = h       // the part of the sprite shown, in game units from its top left
+                    when (dir) {
+                        "left" -> { fw = w * r; fx = w - fw }
+                        "up" -> { fh = h * r; fy = h - fh }
+                        "down" -> fh = h * r
+                        else -> fw = w * r
+                    }
                     if (bmp != null) {
                         val flip = n.b("flipX")
                         val cw = (bmp.width / v.cols).coerceAtLeast(1); val ch = (bmp.height / v.rows).coerceAtLeast(1)
-                        scale(if (flip) -1f else 1f, 1f, Offset(cx, cy)) {
-                            drawImage(bmp, srcOffset = androidx.compose.ui.unit.IntOffset((v.cell % v.cols) * cw, (v.cell / v.cols) * ch), srcSize = IntSize(cw, ch),
-                                dstOffset = androidx.compose.ui.unit.IntOffset((cx - w / 2).toInt(), (cy - h / 2).toInt()), dstSize = IntSize(w.toInt(), h.toInt()))
+                        // the same part of the picture cell
+                        val sx = Math.round(fx / w * cw).toInt(); val sy = Math.round(fy / h * ch).toInt()
+                        val sw = Math.round(fw / w * cw).toInt().coerceAtMost(cw - sx); val sh = Math.round(fh / h * ch).toInt().coerceAtMost(ch - sy)
+                        if (sw > 0 && sh > 0 && fw >= 1.0 && fh >= 1.0) scale(if (flip) -1f else 1f, 1f, Offset(cx, cy)) {
+                            drawImage(bmp, srcOffset = androidx.compose.ui.unit.IntOffset((v.cell % v.cols) * cw + sx, (v.cell / v.cols) * ch + sy), srcSize = IntSize(sw, sh),
+                                dstOffset = androidx.compose.ui.unit.IntOffset((cx - w / 2 + fx).toInt(), (cy - h / 2 + fy).toInt()), dstSize = IntSize(fw.toInt(), fh.toInt()))
                         }
                     } else if (editor) {
-                        drawRect(Color(0x33FFFFFF), Offset((cx - w / 2).toFloat(), (cy - h / 2).toFloat()), Size(w.toFloat(), h.toFloat()))
-                        drawRect(Color(0x99FFFFFF), Offset((cx - w / 2).toFloat(), (cy - h / 2).toFloat()), Size(w.toFloat(), h.toFloat()), style = Stroke(2f))
+                        val o = Offset((cx - w / 2 + fx).toFloat(), (cy - h / 2 + fy).toFloat()); val sz = Size(fw.toFloat(), fh.toFloat())
+                        drawRect(Color(0x33FFFFFF), o, sz)
+                        drawRect(Color(0x99FFFFFF), o, sz, style = Stroke(2f))
                     }
                 }
+                // a DynamicBar looks like its two Sprite children; it only shows a marker in the editor until its script says which is which
+                "DynamicBar" -> if (editor && Bars.emptySprite(n) == null && Bars.fullSprite(n) == null) marker(cx, cy)
                 "TileMap" -> drawTiles(n, images, cx, cy, editor)
                 "CollisionBox" -> if (editor) {         // a hitbox is never drawn in the running game
                     val w = n.f("width").toFloat(); val h = n.f("height").toFloat()
@@ -123,16 +142,24 @@ object Renderer {
                 "Label" -> text(n.s("text"), cx, cy, (n.f("fontSize") * s).toFloat(), parseColor(n.s("color"), Color.White), true)
                 "Button" -> {
                     val w = (n.f("width") * s).toFloat(); val h = (n.f("height") * s).toFloat()
-                    drawRoundRect(parseColor(n.s("color"), Color(0xFF3949AB)), Offset(cx - w / 2, cy - h / 2), Size(w, h), CornerRadius(14f))
-                    text(n.s("text"), cx, cy, (n.f("fontSize") * s).toFloat(), Color.White, true)
+                    if (n.children.any { it.type == "Sprite" }) {
+                        // a Button with Sprite children looks like them (they draw themselves); only the tap area is outlined in the editor
+                        if (editor) drawRect(Color(0x66FFB74D), Offset(cx - w / 2, cy - h / 2), Size(w, h), style = Stroke(2f))
+                    } else {
+                        drawRoundRect(parseColor(n.s("color"), Color(0xFF3949AB)), Offset(cx - w / 2, cy - h / 2), Size(w, h), CornerRadius(14f))
+                        text(n.s("text"), cx, cy, (n.f("fontSize") * s).toFloat(), Color.White, true)
+                    }
                 }
-                else -> if (editor) {
-                    drawCircle(Color(0xAAB388FF), 10f, Offset(cx, cy), style = Stroke(3f))
-                    drawLine(Color(0xAAB388FF), Offset(cx - 16, cy), Offset(cx + 16, cy), 2f)
-                    drawLine(Color(0xAAB388FF), Offset(cx, cy - 16), Offset(cx, cy + 16), 2f)
-                }
+                else -> if (editor) marker(cx, cy)
             }
         }
+    }
+
+    /** The small cross-in-a-circle the editor shows for a node that has no picture. */
+    private fun DrawScope.marker(cx: Float, cy: Float) {
+        drawCircle(Color(0xAAB388FF), 10f, Offset(cx, cy), style = Stroke(3f))
+        drawLine(Color(0xAAB388FF), Offset(cx - 16, cy), Offset(cx + 16, cy), 2f)
+        drawLine(Color(0xAAB388FF), Offset(cx, cy - 16), Offset(cx, cy + 16), 2f)
     }
 
     /** A flat colour for a tile when the map has no picture (or the picture is missing), so maps work before any art exists. */

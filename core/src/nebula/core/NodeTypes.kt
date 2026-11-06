@@ -35,6 +35,11 @@ object NodeTypes {
         NodeType("Label", "Node2D", listOf(s("text", "Label"), f("fontSize", 24.0), s("color", "#FFFFFF", "color")), icon = "T"),
         NodeType("Button", "Node2D", listOf(s("text", "Button"), f("width", 160.0), f("height", 64.0),
             f("fontSize", 24.0), s("color", "#3949AB", "color"), s("action", "", "action")), icon = "B"),
+        // A bar that fills by itself, like Godot's ProgressBar, with no appearance of its own. Its look is two Sprite nodes (children, anywhere below it):
+        // one picture of the empty bar (with its border) and one of the full bar (no border). The script says which is which with `empty @Back` and
+        // `full @Fill` (see Bars). The full sprite is cropped to (value - minValue) / (maxValue - minValue); `direction` is the side it grows toward.
+        NodeType("DynamicBar", "Node2D", listOf(f("value", 100.0), f("minValue", 0.0), f("maxValue", 100.0),
+            s("direction", "right", "direction")), icon = "%"),
         NodeType("Body", "Node2D", listOf(
             f("vx", 0.0), f("vy", 0.0), f("gravity", 0.0), f("width", 32.0), f("height", 32.0),
             b("solid", false), b("static", false), f("bounce", 0.0), b("onGround", false), s("color", "", "color")),

@@ -57,6 +57,7 @@ class Engine(
         private set
     private val metasByName = metas
     private val metasByFile = metas.values.associateBy { it.file }
+    init { if (metas.isNotEmpty()) Bars.register(metas.values) }      // DynamicBar sprite roles, read by the renderer
 
     private class Sched(val id: Long, val frame: Boolean, val ticks: IntArray, val every: IntArray) {
         val tickAcc = DoubleArray(ticks.size); val everyAcc = DoubleArray(every.size)

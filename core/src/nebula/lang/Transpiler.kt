@@ -11,6 +11,8 @@ data class ScriptMeta(
     val name: String, val base: String, val file: String,
     val tweaks: List<TweakMeta>, val ticks: List<Int>, val everyMs: List<Int>, val frame: Boolean,
     val broadcasts: List<BroadcastMeta>,
+    /** DynamicBar scripts: node paths (relative to the bar, `^` already turned into `..`) of the empty-bar and full-bar sprites, "" when not declared. */
+    val barEmpty: String = "", val barFull: String = "",
 )
 data class ScriptSource(val path: String, val text: String)
 data class Origin(val file: String, val line: Int)
@@ -146,10 +148,13 @@ object Transpiler {
     private val tickRe = Regex("""^fn\s+onTick\s*\(\s*(\d+)\s*\)\s*:\s*$""")
     private val everyRe = Regex("""^fn\s+onEvery\s*\(\s*(\d+(?:\.\d+)?)\s*\)\s*:\s*$""")
     private val frameRe = Regex("""^fn\s+onFrame\s*\(\s*([A-Za-z_]\w*)?\s*\)\s*:\s*$""")
+    /** `empty @Back` / `full @Fill`: which child Sprite is the empty bar and which the full bar of a DynamicBar script. */
+    private val barRe = Regex("""^(empty|full)\s+@([^\s@]+)$""")
 
     private fun scan(s: Script, diags: MutableList<Diag>): Info {
         val tweaks = ArrayList<TweakMeta>(); val ticks = ArrayList<Int>(); val every = ArrayList<Int>()
         val bcs = ArrayList<BroadcastMeta>(); var frame = false
+        var barEmpty = ""; var barFull = ""
         val methodParams = HashMap<String, Int>()
         for ((ln, raw) in s.body) {
             val t = stripComment(raw).trim()
@@ -178,9 +183,13 @@ object Transpiler {
                 else every.add(ms)
             }
             if (frameRe.matches(t)) frame = true
+            barRe.matchEntire(t)?.let { m ->
+                val path = m.groupValues[2].replace("^", "..")
+                if (m.groupValues[1] == "empty") barEmpty = path else barFull = path
+            }
             if (t.startsWith("fn onCreation")) diags.add(Diag(s.src.path, ln, "scripts cannot define onCreation: use onReady()"))
         }
-        return Info(ScriptMeta(s.name, s.base, s.src.path, tweaks, ticks, every, frame, bcs), methodParams)
+        return Info(ScriptMeta(s.name, s.base, s.src.path, tweaks, ticks, every, frame, bcs, barEmpty, barFull), methodParams)
     }
 
     private fun inferKind(v: String): String {
@@ -273,6 +282,12 @@ object Transpiler {
             val late = deferred[ln]
             if (late != null) { add("var ${late.name}: ${late.type} = ${late.start}"); continue }     // the real value is set in the constructor
             try {
+                if (barRe.matches(trimmed)) {       // read by scan(); the engine and renderer use the metadata, so nothing is emitted
+                    val base = userChain(s.name, metas).lastOrNull()?.base ?: s.name
+                    if (!NodeTypes.isA(base, "DynamicBar")) throw LowerError("'empty @Node' and 'full @Node' only work in a script of DynamicBar")
+                    if (indent != "\t") throw LowerError("write '${trimmed.substringBefore(' ')} @Node' at the top of the script, one tab in (not inside a function)")
+                    add("# $trimmed"); continue
+                }
                 tweakRe.matchEntire(trimmed)?.let { m ->
                     val ann = m.groupValues[2]
                     add("var ${m.groupValues[1]}${if (ann.isNotEmpty()) ": $ann" else ""} = ${expr(m.groupValues[3], s, metas)}"); return@let

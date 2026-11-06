@@ -22,6 +22,7 @@ import com.nebula.studio.CenterTab
 import com.nebula.studio.Modal
 import com.nebula.studio.Studio
 import com.nebula.studio.runtime.Renderer
+import nebula.core.Bars
 import nebula.core.Kind
 import nebula.core.NodeTypes
 import nebula.core.PropDef
@@ -85,6 +86,14 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
                         for (o in listOf("rect", "circle")) TextBtn(o, { studio.change { it.setProp(n, d.name, o) } }, primary = n.s(d.name) == o)
                     }
                 }
+                "direction" -> {
+                    Text("${d.name} (the side the bar grows toward)", color = C.dim, fontSize = 11.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (o in listOf("right", "left", "up", "down")) TextBtn(o, { studio.change { it.setProp(n, d.name, o) } }, primary = n.s(d.name) == o)
+                    }
+                    if (n.type == "DynamicBar" && Bars.rolesOf(n) == null)
+                        Text("Add two Sprite children, then name them in the bar's script:\n\tempty @Back\n\tfull @Fill", color = C.dim, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                }
                 "image", "sound" -> {
                     Text(d.name, color = C.dim, fontSize = 11.sp)
                     val exts = if (d.hint == "image") imageExt else soundExt
@@ -92,6 +101,7 @@ private fun PropEditor(studio: Studio, n: SceneNode, d: PropDef) {
                         val files = (studio.project?.assets() ?: emptyList()).filter { f -> exts.any { f.lowercase().endsWith(it) } }
                         studio.modal = Modal.Pick("Choose ${d.hint}", listOf("(none)") + files) { picked -> studio.change { it.setProp(n, d.name, if (picked == "(none)") "" else picked) } }
                     }, Modifier.fillMaxWidth())
+                    if (d.hint == "image" && n.s(d.name).isNotEmpty()) TextBtn("Edit in sprite editor", { studio.openSprite(n.s(d.name)) }, Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
                 "animations" -> {
                     Text("${d.name} (sprite sheet animations)", color = C.dim, fontSize = 11.sp)

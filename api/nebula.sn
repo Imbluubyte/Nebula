@@ -46,6 +46,7 @@ var shapes: Dict[Int, Shape] = {}
 var collisionBoxes: Dict[Int, CollisionBox] = {}
 var labels: Dict[Int, Label] = {}
 var buttons: Dict[Int, Button] = {}
+var dynamicBars: Dict[Int, DynamicBar] = {}
 var bodies: Dict[Int, Body] = {}
 var spawnables: Dict[Int, SpawnableBody] = {}
 var tilemaps: Dict[Int, TileMap] = {}
@@ -388,6 +389,61 @@ class Button extends Node2D:
 	fn setText(value):
 		nb_set_s(id, "text", str(value))
 
+# A bar that fills by itself (like Godot's ProgressBar). Its look is two Sprite children named in its script: `empty @Back` and `full @Fill`.
+# The full sprite is cropped to (value - minValue) / (maxValue - minValue); setValue keeps the value inside the range.
+class DynamicBar extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		dynamicBars[id] = self
+	fn value() -> Float:
+		return nb_get_f(id, "value")
+	fn setValue(v: Float):
+		var lo = nb_get_f(id, "minValue")
+		var hi = nb_get_f(id, "maxValue")
+		if v < lo:
+			nb_set_f(id, "value", lo)
+		orif v > hi:
+			nb_set_f(id, "value", hi)
+		else:
+			nb_set_f(id, "value", v)
+	fn fill(amount: Float):
+		setValue(value() + amount)
+	fn drain(amount: Float):
+		setValue(value() - amount)
+	fn fillUp():
+		setValue(nb_get_f(id, "maxValue"))
+	fn emptyOut():
+		setValue(nb_get_f(id, "minValue"))
+	fn minValue() -> Float:
+		return nb_get_f(id, "minValue")
+	fn maxValue() -> Float:
+		return nb_get_f(id, "maxValue")
+	fn setMin(v: Float):
+		nb_set_f(id, "minValue", v)
+		setValue(value())
+	fn setMax(v: Float):
+		nb_set_f(id, "maxValue", v)
+		setValue(value())
+	fn setRange(lo: Float, hi: Float):
+		nb_set_f(id, "minValue", lo)
+		nb_set_f(id, "maxValue", hi)
+		setValue(value())
+	# how full the bar is, from 0.0 to 1.0
+	fn percent() -> Float:
+		var lo = nb_get_f(id, "minValue")
+		var hi = nb_get_f(id, "maxValue")
+		if hi <= lo:
+			return 0.0
+		return (value() - lo) / (hi - lo)
+	fn isFull() -> Bool:
+		return value() >= nb_get_f(id, "maxValue")
+	fn isEmpty() -> Bool:
+		return value() <= nb_get_f(id, "minValue")
+	fn direction() -> String:
+		return nb_get_s(id, "direction")
+	fn setDirection(side: String):
+		nb_set_s(id, "direction", side)
+
 class Body extends Node2D:
 	var collided = BcNode()
 	fn onCreation(id: Int):
@@ -618,6 +674,8 @@ fn wrap(id: Int) -> Node:
 			return Label(id)
 		case "Button":
 			return Button(id)
+		case "DynamicBar":
+			return DynamicBar(id)
 		case "Body":
 			return Body(id)
 		case "SpawnableBody":
@@ -680,6 +738,11 @@ fn asButton(n: Node) -> Button:
 	var r = buttons.get(n.id)
 	if r == null:
 		throw f"node '{n.name()}' is a {n.kind()}, not a Button"
+	return r
+fn asDynamicBar(n: Node) -> DynamicBar:
+	var r = dynamicBars.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a DynamicBar"
 	return r
 fn asBody(n: Node) -> Body:
 	var r = bodies.get(n.id)
