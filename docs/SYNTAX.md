@@ -161,7 +161,7 @@ Camera: `setZoom(z) zoom() followNode(node) followTag(tag) stopFollowing() isFol
 | Sprite | `image flipX width height` and for sheets: `hframes vframes frame`; for animation: `animations animation playing speed` |
 | Shape | `shape (rect or circle) width height color` |
 | Label | `text fontSize color` |
-| Button | `text width height fontSize color action` (with Sprite children it looks like them) |
+| Button | `text width height fontSize color action` (with Sprite children it looks like them; a child Sprite named `Pressed` is shown only while held; `isPressed()`) |
 | DynamicBar | `value minValue maxValue direction` (right, left, up, down) |
 | Body | `vx vy gravity width height solid static bounce color` |
 | SpawnableBody | everything of Body, plus `lifetime health maxHealth damage` |

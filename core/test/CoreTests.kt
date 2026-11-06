@@ -545,6 +545,18 @@ fun main(args: Array<String>) {
         e.setPointers(listOf(100.0 to 100.0)); check("button with a Sprite child still counts as pressed", e.input.isDown("left"))
         e.setPointers(emptyList()); check("button released", !e.input.isDown("left"))
         check("fixed carries over to the Sprite", pad.children[0].isFixed())
+        // pressed look: a Sprite called Pressed replaces the others while the button is held
+        val down = SceneNode(0, "Pressed", "Sprite"); pad.children.add(down); down.parent = pad
+        val look = pad.children[0]
+        check("not held: normal look shown, Pressed hidden", !ButtonSkin.hidden(look, false) && ButtonSkin.hidden(down, false))
+        e.setPointers(listOf(100.0 to 100.0))
+        check("held: only Pressed shown", pad.b("_pressed") && ButtonSkin.hidden(look, false) && !ButtonSkin.hidden(down, false))
+        check("the editor shows both looks", !ButtonSkin.hidden(look, true) && !ButtonSkin.hidden(down, true))
+        e.setPointers(listOf(500.0 to 500.0)); check("finger elsewhere: not pressed", !pad.b("_pressed") && !ButtonSkin.hidden(look, false))
+        e.setPointers(emptyList()); check("released: not pressed", !pad.b("_pressed"))
+        pad.children.remove(down); down.parent = null
+        e.setPointers(listOf(100.0 to 100.0)); check("without a Pressed sprite nothing is hidden", !ButtonSkin.hidden(look, false))
+        e.setPointers(emptyList())
     }
 
     // --- opening a folder or a zip as a project
@@ -594,7 +606,7 @@ fun main(args: Array<String>) {
         val bp = Project.create(File(tmp, "bars"), "Bars", preset = Preset.BLANK)
         File(bp.dir, "scenes/main.nscn").writeText("scene \"S\"\nnode World Node2D\n\tnode Life DynamicBar\n\t\tx = 100\n\t\ty = 40\n\t\tmaxValue = 50\n\t\tvalue = 50\n\t\tnode Back Sprite\n\t\tnode Fill Sprite\n\t\tscript = \"scripts/life.nbs\"\n")
         File(bp.dir, "scripts/life.nbs").writeText("script Life of DynamicBar:\n\tempty @Back\n\tfull @Fill\n\tfn onReady():\n\t\tsetRange(0.0, 200.0)\n\t\tsetValue(150.0)\n\t\tdrain(10.0)\n\t\tfill(5.0)\n\t\tsetMax(300.0)\n\t\tsetMin(10.0)\n\t\tlog(percent())\n\t\tif isFull():\n\t\t\temptyOut()\n\t\tif isEmpty():\n\t\t\tfillUp()\n\t\tlog(value())\n\t\tlog(minValue())\n\t\tlog(maxValue())\n\t\tsetDirection(\"up\")\n")
-        File(bp.dir, "scripts/hud.nbs").writeText("script Hud of Node2D:\n\tfn onReady():\n\t\t(@Life as DynamicBar).drain(1.0)\n\t\t(@/World/Life as DynamicBar).fill(2.0)\n")
+        File(bp.dir, "scripts/hud.nbs").writeText("script Hud of Node2D:\n\tfn onReady():\n\t\t(@Life as DynamicBar).drain(1.0)\n\t\t(@/World/Life as DynamicBar).fill(2.0)\n\t\t(@Life as Button).isPressed()\n")
         val r = Builder(bp, ProcessRunner(), apiDir.absoluteFile, snc).build()
         check("DynamicBar API compiles with snc", r.ok, r.messages.joinToString("\n     "))
         val e = Engine({ bp.readText(it) }, emptyMap(), FakeHost(), { })

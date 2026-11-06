@@ -253,13 +253,17 @@ class Engine(
         val world = points.map { toWorld(it.first, it.second) }          // scripts' touches() are world positions
         input.touches.clear(); input.touches.addAll(world)
         input.virtual.clear()
-        if (points.isEmpty()) return
         for (n in tree.all()) {
-            if (n.type != "Button" || !n.b("visible")) continue
-            val action = n.s("action"); if (action.isEmpty()) continue
-            val (px, py) = worldPos(n); val w = n.f("width"); val h = n.f("height")
-            val pts = if (n.isFixed()) points else world
-            if (pts.any { Math.abs(it.first - px) <= w / 2 && Math.abs(it.second - py) <= h / 2 }) input.virtual.add(action)
+            if (n.type != "Button") continue
+            var held = false
+            if (points.isNotEmpty() && n.b("visible")) {
+                val (px, py) = worldPos(n); val w = n.f("width"); val h = n.f("height")
+                val pts = if (n.isFixed()) points else world
+                held = pts.any { Math.abs(it.first - px) <= w / 2 && Math.abs(it.second - py) <= h / 2 }
+            }
+            n.props["_pressed"] = held                       // read by ButtonSkin (the picture to show) and Button.isPressed()
+            val action = n.s("action")
+            if (held && action.isNotEmpty()) input.virtual.add(action)
         }
     }
 

@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.IntSize
 import nebula.core.Bars
+import nebula.core.ButtonSkin
 import nebula.core.NodeTypes
 import nebula.core.SceneNode
 import nebula.core.SceneTree
@@ -100,7 +101,7 @@ object Renderer {
                     if (c != Color.Transparent) drawRect(c, Offset(cx - w / 2, cy - h / 2), Size(w, h))
                     if (editor) drawRect(Color(0x8866BB6A), Offset(cx - w / 2, cy - h / 2), Size(w, h), style = Stroke(2f))
                 }
-                "Sprite" -> {
+                "Sprite" -> if (!ButtonSkin.hidden(n, editor)) {
                     val (w, h) = sizeOf(n, images)
                     val v = spriteView(n, images, editor)
                     val bmp = images?.get(v.image)

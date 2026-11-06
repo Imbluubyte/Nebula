@@ -388,6 +388,9 @@ class Button extends Node2D:
 		return nb_get_s(id, "text")
 	fn setText(value):
 		nb_set_s(id, "text", str(value))
+	# true while a finger is on the button
+	fn isPressed() -> Bool:
+		return nb_get_b(id, "_pressed")
 
 # A bar that fills by itself (like Godot's ProgressBar). Its look is two Sprite children named in its script: `empty @Back` and `full @Fill`.
 # The full sprite is cropped to (value - minValue) / (maxValue - minValue); setValue keeps the value inside the range.

@@ -61,7 +61,7 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Sprite | picture or animated sprite sheet | image, flipX, width, height, hframes, vframes, frame, animations, animation, playing, speed |
 | Shape | rectangle or circle | shape, width, height, color |
 | Label | text | text, fontSize, color |
-| Button | on-screen button; add **Sprite** children and it looks like them (the colour and text are then not drawn); width and height are still the tap area | text, width, height, color, **action** |
+| Button | on-screen button; add **Sprite** children and it looks like them (the colour and text are then not drawn); a child Sprite named **Pressed** is the look while it is held (see below); width and height are still the tap area | text, width, height, color, **action** |
 | DynamicBar | a bar that fills by itself, like Godot's ProgressBar; no look of its own, see "DynamicBar" below | value, minValue, maxValue, direction |
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
 | CollisionBox | a hitbox: as a child of a Body or SpawnableBody it replaces the body's own width x height box (x, y = offset from the body, first one wins; scale ignored). Script: `width() height() setSize(w, h)` | width, height |
@@ -74,6 +74,13 @@ Positions are in game units (project size, default 1280x720, y grows downward) a
 A **Button with an `action`** (`left`, `right`, `up`, `down`, `jump`, `action`) counts as that action while held: scripts read it with `isDown("left")` /
 `axis("left", "right")`. The keyboard (arrows/WASD, space, Z) feeds the same actions.
 **Body**: gravity pulls it down; a body that is `solid` and `static` is ground that other bodies stand on (`onGround()` becomes true).
+
+### Buttons with their own pictures
+
+Give a Button **Sprite** children and it shows them instead of the coloured box and text. To give it a **pressed look**, add one more Sprite child named exactly `Pressed`:
+while a finger is on the button only `Pressed` is shown (the other Sprites are hidden), and the rest of the time `Pressed` is hidden. The editor shows all of them so you
+can line them up. `Pressed` can be a different picture or the same one cut to another cell. In a script, `isPressed()` tells whether the button is held:
+`if (@Jump as Button).isPressed():`. This works for every button, with or without an `action`.
 
 ### DynamicBar: health bars, loading bars
 
