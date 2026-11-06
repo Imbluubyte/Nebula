@@ -194,7 +194,7 @@ private fun ToolsPanel(s: SpriteSession) {
     // colour: swatch, hex, hue / saturation / brightness, palette, recently used
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
         Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF3A3E66)).border(1.dp, C.dim, RoundedCornerShape(10.dp))) { Box(Modifier.fillMaxSize().background(Color(s.color))) }
-        Field(Argb.hex(s.color), { v -> Argb.parse(v)?.let { s.setColor(it) } }, Modifier.weight(1f), label = "Colour (hex, #RRGGBB)", mono = true)
+        Field(Argb.hex(s.color), { v -> Argb.parse(v)?.let { s.chooseColor(it) } }, Modifier.weight(1f), label = "Colour (hex, #RRGGBB)", mono = true)
     }
     val hsv = s.hsv()
     Column {
@@ -219,7 +219,7 @@ private fun Swatches(title: String, colors: List<Int>, s: SpriteSession) {
         for (row in colors.chunked(8)) Row(horizontalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(bottom = 4.dp)) {
             for (c in row) Box(Modifier.size(28.dp).clip(RoundedCornerShape(6.dp)).background(Color(c))
                 .border(if (c == s.color) 2.dp else 1.dp, if (c == s.color) C.accent2 else C.dim.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                .clickable { s.setColor(c) })
+                .clickable { s.chooseColor(c) })
         }
     }
 }

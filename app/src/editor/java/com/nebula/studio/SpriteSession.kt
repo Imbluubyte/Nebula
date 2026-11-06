@@ -61,7 +61,7 @@ class SpriteSession(val path: String, val doc: SpriteDoc, var cols: Int, var row
     fun layout(): Pair<Int, Int> = if (doc.frameCount == cols * rows) cols to rows else doc.frameCount to 1
 
     // ------------------------------------------------------------------ colour
-    fun setColor(c: Int) {
+    fun chooseColor(c: Int) {
         color = c
         val hsv = FloatArray(3); android.graphics.Color.colorToHSV(c, hsv)
         if (hsv[1] > 0.01f && hsv[2] > 0.01f) hue = hsv[0]
@@ -98,7 +98,7 @@ class SpriteSession(val path: String, val doc: SpriteDoc, var cols: Int, var row
     private fun cx(x: Int) = x.coerceIn(0, doc.width - 1)
     private fun cy(y: Int) = y.coerceIn(0, doc.height - 1)
 
-    private fun pickAt(x: Int, y: Int) { val c = doc.pick(x, y) ?: return; if (SpriteColors.alpha(c) > 0) setColor(c) }
+    private fun pickAt(x: Int, y: Int) { val c = doc.pick(x, y) ?: return; if (SpriteColors.alpha(c) > 0) chooseColor(c) }
 
     private fun shape(x: Int, y: Int) {
         val s = stroke ?: return
