@@ -61,6 +61,7 @@ The app module has two flavors. **editor** (`app/src/editor`): Studio, ui, build
 | camera (zoom, follow, smoothing, per-axis follow, offset, limits) and `fixed` HUD nodes | `Engine.updateCamera/toWorld` (state `camX camY camZoom`, runs every frame after physics; `setPointers`/`tap` take SCREEN coordinates), `NodeTypes.kt` (Camera props, `fixed` on Node2D), `SceneNode.isFixed`, drawing in `runtime/GameView.kt` (world pass through the camera, fixed pass on top), script API `class Camera` in `api/nebula.sn`, target picker in `ui/InspectorPanel.kt` |
 | TileMap (tiles, collisions, painter, script API) | `core/.../TileGrid.kt` (cell storage, `of`/`sync`/`apply`/`cellAt`), `NodeTypes.kt`, `Engine.physics/tileCollide` + `apiGet/apiSet` ("tile:col,row" props), `api/nebula.sn` (`class TileMap`), drawing `Renderer.drawTiles`, painter: `Studio.paintPath/paintTile`, `ui/TilePalette.kt`, gesture in `ui/ViewportPanel.kt`, button in `ui/InspectorPanel.kt` ("tiles" hint) |
 | SpawnableBody (lifetime, health, launch/chase, spawnBody/Burst/Ring) | `NodeTypes.kt` (type + `bodyTypes`), `Engine.serviceSpawnables` (lifetime), `api/nebula.sn` (`class SpawnableBody`, spawn helpers on `Node`); physics treats every type in `NodeTypes.bodyTypes` as a Body |
+| CollisionBox (hitbox child of a body) | `NodeTypes.kt`, `Engine.hitbox` (used by `physics` and `tileCollide`), `api/nebula.sn` (`class CollisionBox`), editor outline in `Renderer` |
 | editor state, project open/save, run/stop/build/export orchestration | `app/.../Studio.kt` (single state holder; panels read it) |
 | commands + keyboard shortcuts + palette list | `app/.../Commands.kt` |
 | layout (wide 3-pane / compact bottom-nav), top bar, status bar | `app/.../ui/StudioScreen.kt` |
@@ -105,6 +106,7 @@ Done: node/scene system, `.nscn` format, editor UI (tree with scripts, viewport,
 palette, shortcuts), Nebula script layer, broadcasts, onFrame/onTick/onEvery, simple physics, run in editor, APK export,
 CI, folders in the Files panel, sprite sheet animation manager + Sound node controls, FPS counter, slim player APK for exports, export to Downloads,
 SpawnableBody node, new-project presets (platformer / top down / blank), TileMap node (painter, solid tiles, script API), camera controls (zoom, follow, smoothing, per-axis, offset, limits) and `fixed` nodes.
+CollisionBox node, node copy/cut/paste + Delete/Esc/zoom shortcuts (`Studio.nodeClipboard`, `Commands.inScene`, `TextFocus` in Theme.kt), mouse wheel zoom + middle-drag pan, script variables that start from other variables (`Transpiler.deferFieldStarts`: set in the generated constructor because SuperNova field initialisers cannot see other fields).
 Gotcha: new `Button` nodes get `fixed = true` from `SceneEditor.addNode`; `fixed` is false by default everywhere else, so old scenes behave as before.
 Known limit: physics checks every body pair each frame (fine for ~1000 bodies, a spatial grid is the next step if a game needs more).
 Ideas not done: animation blending, particles, audio mixer, scene instancing UI, in-editor interpreter (no Termux),

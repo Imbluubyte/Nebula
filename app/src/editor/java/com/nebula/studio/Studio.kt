@@ -113,6 +113,11 @@ class Studio(val ctx: Context) {
     var rev by mutableIntStateOf(0)                    // bumped on every scene change so panels recompose
     var selectedPath by mutableStateOf<String?>(null)
     val collapsed = mutableStateListOf<String>()
+    var nodeClipboard by mutableStateOf<String?>(null)  // copied / cut node (with its children) as scene text; paste works in any scene
+
+    /** Asks the scene view to zoom ("in" / "out") or "fit" (keyboard shortcuts); the view clears it once handled. A new object each time, so repeats count. */
+    class ViewRequest(val kind: String)
+    var viewRequest by mutableStateOf<ViewRequest?>(null)
 
     // ---- tile painting (a TileMap is painted straight in the scene view)
     var paintPath by mutableStateOf<String?>(null)     // path of the TileMap being painted, null = not painting
@@ -327,6 +332,21 @@ class Studio(val ctx: Context) {
     }
     fun deleteSelected() { val n = selected() ?: return; if (change { it.delete(n) } == true) selectedPath = null else info("The root node cannot be deleted.") }
     fun duplicateSelected() { val n = selected() ?: return; change { it.duplicate(n) }?.let { select(it) } }
+    fun copySelected() { val n = selected() ?: return; nodeClipboard = editor?.exportNode(n); info("Copied '${n.name}'") }
+    fun cutSelected() {
+        val n = selected() ?: return
+        if (n === editor?.tree?.root) { info("The root node cannot be cut."); return }
+        nodeClipboard = editor?.exportNode(n); deleteSelected(); info("Cut '${n.name}'")
+    }
+    /** Pastes the copied node as the last child of the selected node (or of the root when nothing is selected). */
+    fun pasteNode() {
+        val text = nodeClipboard ?: return
+        val parent = selected() ?: editor?.tree?.root ?: return
+        val made = change { it.paste(parent, text) }
+        if (made != null) select(made) else info("Nothing to paste.")
+    }
+    /** Deletes the selected node straight away (the Delete key); undo brings it back. */
+    fun deleteSelectedNow() { if (selected() != null) deleteSelected() }
     fun renameNode(path: String, name: String) {
         val t = editor?.tree ?: return; val n = t.find(t.root ?: return, path) ?: return
         change { it.rename(n, name) }; select(n)

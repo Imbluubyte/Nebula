@@ -72,6 +72,7 @@ object Renderer {
                 w * s to h * s
             }
             "Shape", "Button", "Body", "SpawnableBody" -> n.f("width") * s to n.f("height") * s
+            "CollisionBox" -> n.f("width") to n.f("height")          // the engine ignores scale on hitboxes
             "TileMap" -> TileGrid.of(n).let { it.cols * n.f("tileWidth").coerceAtLeast(1.0) to it.rows * n.f("tileHeight").coerceAtLeast(1.0) }
             "Label" -> (n.s("text").length * n.f("fontSize") * 0.55).coerceAtLeast(24.0) * s to n.f("fontSize") * 1.3 * s
             else -> 40.0 to 40.0
@@ -114,6 +115,11 @@ object Renderer {
                     }
                 }
                 "TileMap" -> drawTiles(n, images, cx, cy, editor)
+                "CollisionBox" -> if (editor) {         // a hitbox is never drawn in the running game
+                    val w = n.f("width").toFloat(); val h = n.f("height").toFloat()
+                    drawRect(Color(0x33FF7043), Offset(cx - w / 2, cy - h / 2), Size(w, h))
+                    drawRect(Color(0xCCFF7043), Offset(cx - w / 2, cy - h / 2), Size(w, h), style = Stroke(2f))
+                }
                 "Label" -> text(n.s("text"), cx, cy, (n.f("fontSize") * s).toFloat(), parseColor(n.s("color"), Color.White), true)
                 "Button" -> {
                     val w = (n.f("width") * s).toFloat(); val h = (n.f("height") * s).toFloat()

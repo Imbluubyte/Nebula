@@ -44,6 +44,9 @@ object NodeTypes {
         NodeType("SpawnableBody", "Body", listOf(
             f("lifetime", 0.0, "seconds until it expires by itself, 0 = never"), f("health", 1.0), f("maxHealth", 1.0), f("damage", 1.0)),
             listOf(BcDef("expired"), BcDef("died"), BcDef("damaged", listOf("Float"))), "*"),
+        // A hitbox. As a direct child of a Body (or SpawnableBody) it replaces that body's own width x height box: x, y is the offset of the box
+        // from the body's centre and width, height its size (scale and rotation are ignored, like on a Body). The first CollisionBox child wins.
+        NodeType("CollisionBox", "Node2D", listOf(f("width", 32.0), f("height", 32.0)), icon = "H"),
         // A grid of tiles cut from one picture (see TileGrid). x, y is the centre of the map. `tiles` is edited with the tile painter.
         NodeType("TileMap", "Node2D", listOf(s("image", "", "image"), f("tileWidth", 32.0), f("tileHeight", 32.0),
             f("hframes", 1.0), f("vframes", 1.0), f("columns", 20.0), f("rows", 12.0),

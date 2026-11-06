@@ -43,6 +43,7 @@ var nodes: Dict[Int, Node] = {}
 var node2ds: Dict[Int, Node2D] = {}
 var sprites: Dict[Int, Sprite] = {}
 var shapes: Dict[Int, Shape] = {}
+var collisionBoxes: Dict[Int, CollisionBox] = {}
 var labels: Dict[Int, Label] = {}
 var buttons: Dict[Int, Button] = {}
 var bodies: Dict[Int, Body] = {}
@@ -351,6 +352,19 @@ class Shape extends Node2D:
 		nb_set_f(id, "width", w)
 		nb_set_f(id, "height", h)
 
+# A hitbox: as a child of a Body it replaces the body's own width and height for collisions.
+class CollisionBox extends Node2D:
+	fn onCreation(id: Int):
+		super.onCreation(id)
+		collisionBoxes[id] = self
+	fn width() -> Float:
+		return nb_get_f(id, "width")
+	fn height() -> Float:
+		return nb_get_f(id, "height")
+	fn setSize(w: Float, h: Float):
+		nb_set_f(id, "width", w)
+		nb_set_f(id, "height", h)
+
 class Label extends Node2D:
 	fn onCreation(id: Int):
 		super.onCreation(id)
@@ -598,6 +612,8 @@ fn wrap(id: Int) -> Node:
 			return Sprite(id)
 		case "Shape":
 			return Shape(id)
+		case "CollisionBox":
+			return CollisionBox(id)
 		case "Label":
 			return Label(id)
 		case "Button":
@@ -649,6 +665,11 @@ fn asShape(n: Node) -> Shape:
 	var r = shapes.get(n.id)
 	if r == null:
 		throw f"node '{n.name()}' is a {n.kind()}, not a Shape"
+	return r
+fn asCollisionBox(n: Node) -> CollisionBox:
+	var r = collisionBoxes.get(n.id)
+	if r == null:
+		throw f"node '{n.name()}' is a {n.kind()}, not a CollisionBox"
 	return r
 fn asLabel(n: Node) -> Label:
 	var r = labels.get(n.id)

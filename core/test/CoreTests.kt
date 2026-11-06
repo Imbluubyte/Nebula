@@ -437,6 +437,61 @@ fun main(args: Array<String>) {
         check("Camera API compiles with snc", r.ok, r.messages.joinToString("\n     "))
     }
 
+    // --- script variables that start from other variables (SuperNova gives a field's starting value no access to other fields)
+    val fieldSrc = "script Hero of Node2D:\n\ttweak speed = 200.5\n\tvar runSpeed = speed * 1.5\n\tvar label = f\"speed {speed}\"\n\tvar plain = 5\n" +
+        "\tvar fast: Float = runSpeed + 1.0\n\tfn onReady():\n\t\tlog(runSpeed)\n\t\tlog(label)\n\t\tlog(fast)\n"
+    run {
+        val o = lowerOne(fieldSrc)
+        val src = o.source
+        check("a variable that starts from a tweak is set in the constructor", o.ok && "\tvar runSpeed: Float = 0.0" in src && "\t\trunSpeed = speed * 1.5" in src &&
+            "\tvar label: String = \"\"" in src && "\t\tlabel = f\"speed {speed}\"" in src && "\tvar plain = 5" in src, o.diags.joinToString() + "\n" + src)
+        check("tweak override comes before the variables that use it", src.indexOf("\t\t\tspeed = ") in 0 until src.indexOf("\t\trunSpeed = speed") &&
+            src.indexOf("\t\trunSpeed = speed") < src.indexOf("\t\tfast = runSpeed + 1.0"), src)
+        check("a variable can start from one that was itself set late", "\tvar fast: Float = 0.0" in src)
+        check("a node as a starting value explains itself", lowerOne("script A of Node2D:\n\tvar target = @Player\n").diags.any { "cannot start as a node" in it.message })
+        check("an unclear type asks for one", lowerOne("script A of Node2D:\n\tvar a = 1\n\tvar b = foo(a)\n").diags.any { "write its type" in it.message })
+        check("plain starting values are left alone", lowerOne("script A of Node2D:\n\tvar a = 1\n\tvar b = foo()\n\tfn onReady():\n\t\tvar c = a\n").let { it.ok && "\tvar a = 1" in it.source && "\tvar b = foo()" in it.source })
+        check("undefined variable errors get a hint", o.remap("x.sn:1: undefined variable 'abc'").contains("declare it at the top of the script"))
+        val vp = Project.create(File(tmp, "fieldinit"), "Field Init", preset = Preset.BLANK)
+        File(vp.dir, "scripts/hero.nbs").writeText(fieldSrc)
+        val r = Builder(vp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("variables starting from other variables compile with snc", r.ok, r.messages.joinToString("\n     "))
+    }
+
+    // --- CollisionBox
+    check("CollisionBox is a Node2D but not a body", NodeTypes.exists("CollisionBox") && NodeTypes.isA("CollisionBox", "Node2D") && "CollisionBox" !in NodeTypes.bodyTypes)
+    run {
+        val cp = Project.create(File(tmp, "hitbox"), "Hitbox", preset = Preset.BLANK)
+        File(cp.dir, "scenes/main.nscn").writeText("scene \"S\"\nnode World Node2D\n\tnode Ground Body\n\t\tx = 400\n\t\ty = 500\n\t\twidth = 800\n\t\theight = 40\n\t\tsolid = true\n\t\tstatic = true\n" +
+            "\tnode Plain Body\n\t\tx = 100\n\t\ty = 100\n\t\tgravity = 1000\n" +
+            "\tnode Boxed Body\n\t\tx = 200\n\t\ty = 100\n\t\tgravity = 1000\n\t\tnode Hit CollisionBox\n\t\t\twidth = 10\n\t\t\theight = 10\n" +
+            "\tnode Shifted Body\n\t\tx = 300\n\t\ty = 100\n\t\tgravity = 1000\n\t\tnode Hit CollisionBox\n\t\t\ty = -10\n\t\t\twidth = 10\n\t\t\theight = 10\n")
+        val e = Engine({ cp.readText(it) }, emptyMap(), FakeHost(), { })
+        check("hitbox scene loads", e.loadScene("scenes/main.nscn"))
+        repeat(300) { e.update(1.0 / 60) }
+        fun rest(name: String) = e.tree.find(e.tree.root!!, name)!!.f("y")
+        check("a body without a CollisionBox uses its own size", Math.abs(rest("Plain") - 464.0) < 1.5, rest("Plain").toString())               // 32 high: bottom on the ground's top (480)
+        check("a CollisionBox child replaces the body's hitbox", Math.abs(rest("Boxed") - 475.0) < 1.5, rest("Boxed").toString())             // 10 high: rests 5 above its centre
+        check("a CollisionBox offset moves the hitbox", Math.abs(rest("Shifted") - 485.0) < 1.5, rest("Shifted").toString())                  // box centre 10 above the body's
+        File(cp.dir, "scripts/box.nbs").writeText("script Box of CollisionBox:\n\tfn onReady():\n\t\tsetSize(20.0, 10.0)\n\t\tlog(width())\n\t\tlog(height())\n")
+        val r = Builder(cp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("CollisionBox API compiles with snc", r.ok, r.messages.joinToString("\n     "))
+    }
+
+    // --- node clipboard (copy / cut / paste in the editor)
+    run {
+        val ed = SceneEditor { null }
+        ed.newScene("scenes/t.nscn", "T")
+        val root = ed.tree.root!!
+        val a = ed.addNode(root, "Body", "A"); ed.setProp(a, "x", 12.0)
+        ed.addNode(a, "CollisionBox", "Hit")
+        val text = ed.exportNode(a)
+        val pasted = ed.paste(root, text)
+        check("paste copies a node with its children", pasted != null && pasted.name == "A2" && pasted.f("x") == 12.0 && pasted.children.singleOrNull()?.type == "CollisionBox")
+        check("paste is one undo step", ed.undo() && ed.tree.root!!.children.size == 1)
+        check("text that is not a node does not paste", ed.paste(ed.tree.root!!, "not a scene") == null)
+    }
+
     println(if (failures == 0) "\nALL PASSED" else "\n$failures FAILED")
     System.exit(if (failures == 0) 0 else 1)
 }

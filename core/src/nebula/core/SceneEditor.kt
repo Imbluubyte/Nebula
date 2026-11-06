@@ -97,6 +97,15 @@ class SceneEditor(private val readFile: (String) -> String?) {
         }
     }
 
+    /** The node and everything under it as scene text, for copy and cut (survives switching scenes). */
+    fun exportNode(n: SceneNode): String = SceneFile.write(SceneFile.fromTree(n.name, n))
+
+    /** Pastes text made by [exportNode] as the last child of [parent]; null when the text is not a node. One undo step. */
+    fun paste(parent: SceneNode, text: String): SceneNode? {
+        val def = runCatching { SceneFile.parse(text) }.getOrNull() ?: return null
+        return edit { buildNode(def.root, parent) }
+    }
+
     private fun copyTree(n: SceneNode): SceneNode {
         val c = tree.create(n.type, n.name)
         c.props.putAll(n.props); c.tweaks.putAll(n.tweaks); c.tags.addAll(n.tags); c.script = n.script; c.instanceOf = n.instanceOf

@@ -335,6 +335,16 @@ class Engine(
         }
     }
 
+    /**
+     * A body's hitbox as [centre offset x, centre offset y, width, height]. A CollisionBox child replaces the body's own width x height box
+     * (its x, y is the offset from the body's position); the first one wins. Without one the box is centred on the body.
+     */
+    private fun hitbox(b: SceneNode): DoubleArray {
+        val box = b.children.firstOrNull { it.type == "CollisionBox" }
+            ?: return doubleArrayOf(0.0, 0.0, b.f("width"), b.f("height"))
+        return doubleArrayOf(box.f("x"), box.f("y"), box.f("width").coerceAtLeast(0.0), box.f("height").coerceAtLeast(0.0))
+    }
+
     private fun physics(dt: Double) {
         val all = tree.all()
         val bodies = all.filter { it.type in NodeTypes.bodyTypes }
@@ -353,9 +363,13 @@ class Engine(
         tileTouching.retainAll(tileContacts); tileTouching.addAll(tileContacts)
         // world positions are looked up once per frame (not once per pair) so hundreds of bodies stay cheap
         val n = bodies.size
-        val wx = DoubleArray(n); val wy = DoubleArray(n)
-        for (i in 0 until n) { val (px, py) = worldPos(bodies[i]); wx[i] = px; wy[i] = py }
-        val ww = DoubleArray(n) { bodies[it].f("width") }; val hh = DoubleArray(n) { bodies[it].f("height") }
+        val wx = DoubleArray(n); val wy = DoubleArray(n)          // centre of each hitbox (a CollisionBox child moves it away from the body's own position)
+        val offX = DoubleArray(n); val offY = DoubleArray(n); val ww = DoubleArray(n); val hh = DoubleArray(n)
+        for (i in 0 until n) {
+            val (px, py) = worldPos(bodies[i]); val hb = hitbox(bodies[i])
+            offX[i] = hb[0]; offY[i] = hb[1]; ww[i] = hb[2]; hh[i] = hb[3]
+            wx[i] = px + offX[i]; wy[i] = py + offY[i]
+        }
         val overlapping = HashSet<Long>()
         for (i in 0 until n) for (j in i + 1 until n) {
             val a = bodies[i]; val b = bodies[j]
@@ -371,8 +385,8 @@ class Engine(
                 host?.fire(b.id, "collided", 0.0, 0.0, a.id); check()
             }
             val aSolid = a.b("solid") && a.b("static"); val bSolid = b.b("solid") && b.b("static")
-            if (bSolid && !a.b("static")) { resolve(a, dx, dy, ox, oy); worldPos(a).let { wx[i] = it.first; wy[i] = it.second } }
-            else if (aSolid && !b.b("static")) { resolve(b, -dx, -dy, ox, oy); worldPos(b).let { wx[j] = it.first; wy[j] = it.second } }
+            if (bSolid && !a.b("static")) { resolve(a, dx, dy, ox, oy); worldPos(a).let { wx[i] = it.first + offX[i]; wy[i] = it.second + offY[i] } }
+            else if (aSolid && !b.b("static")) { resolve(b, -dx, -dy, ox, oy); worldPos(b).let { wx[j] = it.first + offX[j]; wy[j] = it.second + offY[j] } }
         }
         touching.retainAll(overlapping); touching.addAll(overlapping)
     }
@@ -390,10 +404,11 @@ class Engine(
     /** Pushes body [b] out of solid tiles along one axis (the other axis was not moved yet, so a body on flat ground never snags a seam). */
     private fun tileCollide(b: SceneNode, maps: List<TileSolid>, horizontal: Boolean, contacts: MutableSet<Long>) {
         val eps = 1e-3                                  // touching is not overlapping; keeps a resting body from being shoved sideways
-        val bounce = b.f("bounce"); val hw = b.f("width") / 2; val hh = b.f("height") / 2
+        val hb = hitbox(b)
+        val bounce = b.f("bounce"); val hw = hb[2] / 2; val hh = hb[3] / 2
         for (m in maps) {
             val (wx, wy) = b.worldPos()
-            var x = wx; var y = wy
+            var x = wx + hb[0]; var y = wy + hb[1]          // centre of the hitbox; shifting it shifts the body by the same amount
             val c0 = Math.floor((x - hw - m.left) / m.tw).toInt().coerceAtLeast(0); val c1 = Math.floor((x + hw - m.left - eps) / m.tw).toInt().coerceAtMost(m.grid.cols - 1)
             val r0 = Math.floor((y - hh - m.top) / m.th).toInt().coerceAtLeast(0); val r1 = Math.floor((y + hh - m.top - eps) / m.th).toInt().coerceAtMost(m.grid.rows - 1)
             var hit = false

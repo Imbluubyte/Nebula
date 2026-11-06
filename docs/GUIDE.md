@@ -39,6 +39,8 @@ Its numbers (`tweak speed`, `tweak jumpPower`) are also editable in the Inspecto
 * Everything works by touch. Shortcuts (hardware keyboard) are listed in the command palette (Ctrl+Shift+P, or the search button) and F1:
   Ctrl+S save, Ctrl+Z/Ctrl+Shift+Z undo/redo, F5 run, F6 run this scene, Shift+F5 stop, Ctrl+B build, Ctrl+E export,
   Ctrl+N add node, Ctrl+Shift+N new script, Ctrl+D duplicate, F2 rename, Ctrl+Backspace delete, Ctrl+1/2/3 scene/script/game.
+  In the scene view also Ctrl+C/Ctrl+X/Ctrl+V copy, cut and paste a node (with its children; paste goes under the selected node), Delete removes it, Esc deselects,
+  Ctrl+= / Ctrl+- zoom, Ctrl+0 fit. Mouse: wheel zooms at the pointer, middle-button drag pans. They stand aside while a text field has the keyboard.
 
 ## 3. Nodes
 
@@ -53,6 +55,7 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Label | text | text, fontSize, color |
 | Button | on-screen button | text, width, height, color, **action** |
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
+| CollisionBox | a hitbox: as a child of a Body or SpawnableBody it replaces the body's own width x height box (x, y = offset from the body, first one wins; scale ignored). Script: `width() height() setSize(w, h)` | width, height |
 | SpawnableBody | a Body made to be spawned many times (bullets, enemies, pickups) | everything a Body has, plus lifetime, health, maxHealth, damage |
 | TileMap | a grid of tiles cut from one picture (floors, walls, levels) | image, tileWidth, tileHeight, hframes, vframes, columns, rows, solid, solidTiles, tiles |
 | Camera | the view: zoom, follow a node, limits | zoom, follow, target, followX, followY, smoothing, offsetX, offsetY, limits, limitLeft, limitTop, limitRight, limitBottom |

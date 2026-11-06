@@ -17,11 +17,16 @@ data class Origin(val file: String, val line: Int)
 class Lowered(val source: String, val metas: List<ScriptMeta>, val diags: List<Diag>, val origins: List<Origin>) {
     val ok get() = diags.isEmpty()
     /** Rewrites `game.sn:LINE:COL` in compiler output to the original script file and line. */
-    fun remap(compilerOutput: String): String =
-        Regex("""game\.sn:(\d+)""").replace(compilerOutput) { m ->
+    fun remap(compilerOutput: String): String {
+        val mapped = Regex("""game\.sn:(\d+)""").replace(compilerOutput) { m ->
             val o = origins.getOrNull(m.groupValues[1].toInt() - 1)
             if (o != null && o.line > 0) "${o.file}:${o.line}" else m.value
         }
+        val names = Regex("""undefined variable '(\w+)'""").findAll(mapped).map { it.groupValues[1] }.distinct().toList()
+        if (names.isEmpty()) return mapped
+        return mapped + "\nhint: a variable declared inside a function (or an if / for block) only exists there. To use '" + names.joinToString("', '") +
+            "' in other functions too, declare it at the top of the script, one tab in (next to your tweaks), and assign it inside the function."
+    }
 }
 
 /**
@@ -242,12 +247,17 @@ object Transpiler {
         out.add("var _reg_${s.name}: Dict[Int, ${s.name}] = {}", file, s.headerLine)
         out.add("class ${s.name} extends ${baseRef(s.base, metas)}:", file, s.headerLine)
         val hearKeys = HashSet<String>(); val connects = ArrayList<Pair<Int, String>>()
+        val deferred = deferFieldStarts(s, metas, diags)
 
-        // generated constructor: registers the object and loads tweak overrides
+        // generated constructor: registers the object, loads tweak overrides and sets the variables whose starting value uses other variables
+        // (in the order they are written, so each one sees the tweaks and variables above it)
         out.add("\tfn onCreation(id: Int):")
         out.add("\t\tsuper.onCreation(id)")
         out.add("\t\t_reg_${s.name}[id] = self")
-        for (t in meta.tweaks) {
+        for ((ln, raw) in s.body) {
+            deferred[ln]?.let { d -> out.add("\t\t${d.name} = ${d.value}", file, ln) }
+            val tm = tweakRe.matchEntire(stripComment(raw).trim()) ?: continue
+            val t = meta.tweaks.firstOrNull { it.name == tm.groupValues[1] } ?: continue
             val getter = when (t.kind) { "Int" -> "int(nebula.nb_get_f(id, \"tweak:${t.name}\"))"; "Float" -> "nebula.nb_get_f(id, \"tweak:${t.name}\")"
                 "Bool" -> "nebula.nb_get_b(id, \"tweak:${t.name}\")"; else -> "nebula.nb_get_s(id, \"tweak:${t.name}\")" }
             out.add("\t\tif nebula.nb_has(id, \"tweak:${t.name}\"):"); out.add("\t\t\t${t.name} = $getter")
@@ -260,6 +270,8 @@ object Transpiler {
             val comment = commentStart(code).let { if (it >= 0) "  " + code.substring(it) else "" }
             fun add(text: String) = out.add(indent + text + comment, file, ln)
             if (trimmed.isEmpty()) { out.add(raw, file, ln); continue }
+            val late = deferred[ln]
+            if (late != null) { add("var ${late.name}: ${late.type} = ${late.start}"); continue }     // the real value is set in the constructor
             try {
                 tweakRe.matchEntire(trimmed)?.let { m ->
                     val ann = m.groupValues[2]
@@ -314,6 +326,102 @@ object Transpiler {
     }
 
     private class LowerError(m: String) : Exception(m)
+
+    // ---------------------------------------------------------------- script variables that start from other variables
+    /** A script variable whose starting value is set in the constructor ([value], already lowered) because the compiler cannot evaluate it where the variable is declared. */
+    private class Deferred(val name: String, val type: String, val value: String) {
+        val start get() = when (type) { "Int" -> "0"; "Float" -> "0.0"; "Bool" -> "false"; else -> "\"\"" }
+    }
+
+    private val fieldRe = Regex("""^(var|const)\s+([A-Za-z_]\w*)\s*(?::\s*([A-Za-z_]\w*))?\s*=\s*(.+)$""")
+    private val identRe = Regex("""(?<![\w.])[A-Za-z_]\w*""")
+    private val basicTypes = setOf("Int", "Float", "Bool", "String")
+
+    private fun literalKind(v: String): String? {
+        val t = v.trim()
+        return when { t == "true" || t == "false" -> "Bool"; t.startsWith("\"") || t.startsWith("f\"") -> "String"
+            t.toIntOrNull() != null -> "Int"; t.toDoubleOrNull() != null -> "Float"; else -> null }
+    }
+
+    /** The code of [init] without string contents, except what sits inside the braces of an f-string (that is code too). */
+    private fun codeOf(init: String): String {
+        val sb = StringBuilder(); var i = 0
+        while (i < init.length) {
+            val c = init[i]
+            if (c == '"') {
+                var j = i + 1
+                while (j < init.length && init[j] != '"') { if (init[j] == '\\') j++; j++ }
+                val lit = init.substring(i + 1, minOf(j, init.length))
+                if (i > 0 && init[i - 1] == 'f') {
+                    sb.setLength(sb.length - 1)
+                    for (m in Regex("""\{([^{}]+)\}""").findAll(lit)) sb.append(' ').append(m.groupValues[1]).append(' ')
+                }
+                sb.append(" \"\" "); i = j + 1
+            } else { sb.append(c); i++ }
+        }
+        return sb.toString()
+    }
+
+    /** Type of plain arithmetic over typed variables and numbers ("speed * 2" is Float when speed is), or null when it needs a type written by hand. */
+    private fun arithmeticKind(code: String, kinds: Map<String, String?>): String? {
+        val t = code.trim()
+        if (Regex("""[A-Za-z_]\w*""").matches(t)) return kinds[t]?.takeIf { it in basicTypes }
+        if (!Regex("""[\w\s+\-*%().]+""").matches(t)) return null
+        var float = false
+        for (m in Regex("""[A-Za-z_]\w*|\d+(?:\.\d+)?""").findAll(t)) {
+            val tok = m.value
+            if (tok[0].isDigit()) { if ('.' in tok) float = true }
+            else when (kinds[tok]) { "Float" -> float = true; "Int" -> {}; else -> return null }
+        }
+        return if (float) "Float" else "Int"
+    }
+
+    /**
+     * SuperNova evaluates a field's starting value where the field is declared, with no access to the other fields or to `id`.
+     * So `var run = speed * 2` (or `var hp = maxHp`) would fail with "undefined variable 'speed'". Such variables are declared with a plain
+     * starting value and set in the generated constructor instead; the result maps script line -> variable. Values that cannot be moved there
+     * (a node path, spawn, a type that is not plain to see) get a clear message instead of a compiler error.
+     */
+    private fun deferFieldStarts(s: Script, metas: Map<String, ScriptMeta>, diags: MutableList<Diag>): Map<Int, Deferred> {
+        val file = s.src.path
+        val indent = s.body.firstOrNull { stripComment(it.second).isNotBlank() }?.second?.takeWhile { it == '\t' || it == ' ' } ?: return emptyMap()
+        val kinds = HashMap<String, String?>()
+        for (m in userChain(s.name, metas)) for (t in m.tweaks) kinds[t.name] = t.kind
+        val fields = ArrayList<Pair<Int, String>>()
+        for ((ln, raw) in s.body) {
+            if (!raw.startsWith(indent) || raw.length > indent.length && raw[indent.length].isWhitespace()) continue      // only this level: not the lines inside a function
+            val t = stripComment(raw).trim()
+            fieldRe.matchEntire(t)?.let { m -> kinds[m.groupValues[2]] = m.groupValues[3].ifEmpty { literalKind(m.groupValues[4]) }; fields.add(ln to t) }
+            if (tweakRe.matches(t)) fields.add(ln to t)
+        }
+        val out = HashMap<Int, Deferred>()
+        for ((ln, t) in fields) {
+            val tm = tweakRe.matchEntire(t); val fm = if (tm == null) fieldRe.matchEntire(t) else null
+            val name = tm?.groupValues?.get(1) ?: fm?.groupValues?.get(2) ?: continue
+            val init = (tm?.groupValues?.get(3) ?: fm?.groupValues?.get(4) ?: continue).trim()
+            val code = codeOf(init)
+            val needsNode = '@' in code || Regex("""\bspawn\b""").containsMatchIn(code)
+            val refs = identRe.findAll(code).map { it.value }.filter { it != name && it in kinds }.distinct().toList()
+            if (refs.isEmpty() && !needsNode) continue
+            if (needsNode) {
+                diags.add(Diag(file, ln, "'$name' cannot start as a node (@Path) or a spawn: nodes do not exist yet while the script is created. " +
+                    "Use a small function instead, for example: fn $name() -> Node: return @Path")); continue
+            }
+            if (fm != null && fm.groupValues[1] == "const") {
+                diags.add(Diag(file, ln, "'$name' is a const and cannot start from the variable ${refs.first()}: use var, or write the number here")); continue
+            }
+            val type = if (tm != null) kinds[name] else fm!!.groupValues[3].ifEmpty { literalKind(init) ?: arithmeticKind(code, kinds) ?: "" }
+            if (type == null || type !in basicTypes) {
+                val typed = fm != null && fm.groupValues[3].isNotEmpty()
+                diags.add(Diag(file, ln, if (typed) "'$name' cannot start from the variable ${refs.first()}: only Int, Float, Bool and String variables can. Set it inside fn onReady() instead"
+                    else "'$name' starts from the variable ${refs.first()}: write its type so it can be set when the script is created, for example: var $name: Float = $init")); continue
+            }
+            try { out[ln] = Deferred(name, type, expr(init, s, metas)) }
+            catch (e: LowerError) { diags.add(Diag(file, ln, e.message ?: "error")); continue }
+            kinds[name] = type
+        }
+        return out
+    }
 
     private val onHearRe = Regex("""^fn\s+onHear\s*\((.*)\)\s*:\s*$""")
     private val hearSrcRe = Regex("""^(@([\w/^]*)(?:\s+as\s+([A-Za-z_]\w*))?\s*\.\s*)?([A-Za-z_]\w*)$""")

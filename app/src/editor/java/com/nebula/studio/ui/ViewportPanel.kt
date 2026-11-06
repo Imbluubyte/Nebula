@@ -20,9 +20,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,6 +37,7 @@ import com.nebula.studio.runtime.Renderer.text
 /**
  * Scene editor view. One finger on a node selects and drags it, one finger on empty space pans,
  * two fingers pan and pinch-zoom. Works with touch only; the buttons on the right cover zoom and snapping.
+ * With a mouse: the wheel zooms around the pointer, dragging with the middle button pans, and Ctrl + / Ctrl - / Ctrl 0 (see Commands) zoom and fit.
  */
 @Composable
 fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
@@ -52,6 +55,27 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
         offset = Offset((size.width - gw * zoom) / 2f, (size.height - gh * zoom) / 2f)
     }
     LaunchedEffect(size, studio.scenePath) { if (zoom == 0f) fit() }
+    val focusManager = LocalFocusManager.current
+
+    /** Zooms by [factor] keeping the point [p] (view coordinates) where it is. */
+    fun zoomAt(p: Offset, factor: Float) {
+        if (zoom == 0f) return
+        val nz = (zoom * factor).coerceIn(0.05f, 8f)
+        offset = p - (p - offset) * (nz / zoom)
+        zoom = nz
+    }
+
+    // keyboard zoom (Ctrl + / Ctrl - / Ctrl 0) arrives as a request from Commands
+    val request = studio.viewRequest
+    LaunchedEffect(request) {
+        val r = request ?: return@LaunchedEffect
+        when (r.kind) {
+            "in" -> zoomAround(size, { zoom }, { offset }, 1.25f) { z, o -> zoom = z; offset = o }
+            "out" -> zoomAround(size, { zoom }, { offset }, 0.8f) { z, o -> zoom = z; offset = o }
+            "fit" -> fit()
+        }
+        studio.viewRequest = null
+    }
 
     fun toWorld(p: Offset) = Offset((p.x - offset.x) / zoom, (p.y - offset.y) / zoom)
     fun hit(p: Offset): DrawItem? {
@@ -64,9 +88,31 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
     }
 
     Box(modifier.background(Color(0xFF0B0C18)).onSizeChanged { size = it }) {
-        Canvas(Modifier.fillMaxSize().pointerInput(studio.scenePath, studio.snap) {
+        Canvas(Modifier.fillMaxSize().pointerInput(studio.scenePath) {
+            // mouse wheel: zoom around the pointer
+            awaitPointerEventScope {
+                while (true) {
+                    val ev = awaitPointerEvent()
+                    if (ev.type == PointerEventType.Scroll) {
+                        val c = ev.changes.first()
+                        val dy = c.scrollDelta.y
+                        if (dy != 0f) { zoomAt(c.position, if (dy < 0f) 1.1f else 1f / 1.1f); c.consume() }
+                    }
+                }
+            }
+        }.pointerInput(studio.scenePath, studio.snap) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
+                focusManager.clearFocus()                      // so a text field in the inspector lets go of the keyboard (and its shortcuts work again)
+                if (currentEvent.buttons.isTertiaryPressed) {
+                    // middle mouse button: dragging pans the view, whatever is under the pointer
+                    do {
+                        val ev = awaitPointerEvent()
+                        val ch = ev.changes.firstOrNull { it.pressed }
+                        if (ch != null) { offset += ch.positionChange(); ch.consume() }
+                    } while (ev.changes.any { it.pressed })
+                    return@awaitEachGesture
+                }
                 val paintNode = studio.paintNode()          // while painting tiles one finger paints and two fingers pan/zoom
                 val target = if (paintNode != null) null else hit(down.position)
                 if (target != null) studio.select(target.node)
@@ -155,6 +201,7 @@ fun ViewportPanel(studio: Studio, modifier: Modifier = Modifier) {
 }
 
 private fun zoomAround(size: IntSize, zoom: () -> Float, offset: () -> Offset, factor: Float, set: (Float, Offset) -> Unit) {
+    if (zoom() == 0f) return                       // not fitted yet
     val c = Offset(size.width / 2f, size.height / 2f)
     val nz = (zoom() * factor).coerceIn(0.05f, 8f)
     set(nz, c - (c - offset()) * (nz / zoom()))

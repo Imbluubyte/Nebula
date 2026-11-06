@@ -83,12 +83,16 @@ fun Chip(text: String, color: Color = C.accent, modifier: Modifier = Modifier) {
     }
 }
 
+/** How many [Field]s hold the keyboard focus right now. Node shortcuts (copy, cut, paste, delete) stand aside while one does, so they never steal a text field's own keys. */
+object TextFocus { var count = 0 }
+
 /** Dense single-line text input. Commits on Done / focus loss (so typing makes one undo step, not one per key). */
 @Composable
 fun Field(value: String, onCommit: (String) -> Unit, modifier: Modifier = Modifier, label: String? = null,
           number: Boolean = false, mono: Boolean = false, placeholder: String = "") {
     var text by remember(value) { mutableStateOf(value) }
     var focused by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) { onDispose { if (focused) TextFocus.count = maxOf(0, TextFocus.count - 1) } }
     Column(modifier) {
         if (label != null) Text(label, color = C.dim, fontSize = 11.sp, modifier = Modifier.padding(bottom = 2.dp))
         BasicTextField(
@@ -97,7 +101,11 @@ fun Field(value: String, onCommit: (String) -> Unit, modifier: Modifier = Modifi
             cursorBrush = SolidColor(C.accent2),
             keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Decimal else KeyboardType.Text, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onCommit(text) }),
-            modifier = Modifier.fillMaxWidth().onFocusChanged { if (focused && !it.isFocused && text != value) onCommit(text); focused = it.isFocused },
+            modifier = Modifier.fillMaxWidth().onFocusChanged {
+                if (focused && !it.isFocused && text != value) onCommit(text)
+                if (it.isFocused != focused) TextFocus.count = maxOf(0, TextFocus.count + if (it.isFocused) 1 else -1)
+                focused = it.isFocused
+            },
             decorationBox = { inner ->
                 Box(Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp)).background(C.bg)
                     .padding(horizontal = 10.dp, vertical = 9.dp), contentAlignment = Alignment.CenterStart) {
