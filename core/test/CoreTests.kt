@@ -492,6 +492,221 @@ fun main(args: Array<String>) {
         check("text that is not a node does not paste", ed.paste(ed.tree.root!!, "not a scene") == null)
     }
 
+    // --- DynamicBar: sprite roles declared in the script, fill maths
+    run {
+        check("DynamicBar is a Node2D", NodeTypes.exists("DynamicBar") && NodeTypes.isA("DynamicBar", "Node2D") && "DynamicBar" !in NodeTypes.bodyTypes)
+        val barSrc = "script Life of DynamicBar:\n\tempty @Back\n\tfull @Frame/Fill\n\tfn onReady():\n\t\tsetValue(40.0)\n"
+        val kidSrc = "script BigLife of Life:\n\tfull @^/Other\n"
+        val low = Transpiler.lower(listOf(ScriptSource("scripts/life.nbs", barSrc), ScriptSource("scripts/big.nbs", kidSrc)))
+        check("bar script lowers", low.ok, low.diags.joinToString())
+        val lm = low.metas.associateBy { it.name }
+        check("bar roles in metadata", lm["Life"]?.barEmpty == "Back" && lm["Life"]?.barFull == "Frame/Fill" && lm["BigLife"]?.barFull == "../Other" && lm["BigLife"]?.barEmpty == "")
+        check("bar lines are not sent to the compiler", !low.source.lines().any { it.trim().startsWith("empty @") || it.trim().startsWith("full @") })
+        val back = MetaFile.read(MetaFile.write(low.metas))
+        check("bar roles survive the meta file", back["Life"]?.barEmpty == "Back" && back["Life"]?.barFull == "Frame/Fill" && back["BigLife"]?.barFull == "../Other")
+        check("empty/full only for DynamicBar scripts", lowerOne("script A of Node2D:\n\tempty @Back\n").diags.any { "DynamicBar" in it.message })
+        check("empty/full not inside a function", lowerOne("script A of DynamicBar:\n\tfn onReady():\n\t\tfull @Fill\n").diags.any { "one tab" in it.message })
+
+        Bars.register(back.values)
+        val t = SceneTree()
+        val root = t.create("Node2D", "Root"); t.setRoot(root)
+        val bar = t.create("DynamicBar", "Bar"); bar.script = "scripts/life.nbs"; t.add(root, bar)
+        val bg = t.create("Sprite", "Back"); t.add(bar, bg)
+        val frame = t.create("Node2D", "Frame"); t.add(bar, frame)
+        val fill = t.create("Sprite", "Fill"); t.add(frame, fill)
+        bar.props["value"] = 25.0; bar.props["minValue"] = 0.0; bar.props["maxValue"] = 100.0
+        check("bar finds its two sprites", Bars.emptySprite(bar) === bg && Bars.fullSprite(bar) === fill)
+        check("only the full sprite is cropped", Bars.fillOf(bg) == null && Bars.fillOf(fill)?.first == 0.25 && Bars.fillOf(fill)?.second == "right")
+        bar.props["value"] = 150.0; check("fraction clamps above max", Bars.fraction(bar) == 1.0)
+        bar.props["value"] = -5.0; check("fraction clamps below min", Bars.fraction(bar) == 0.0)
+        bar.props["minValue"] = 50.0; bar.props["maxValue"] = 150.0; bar.props["value"] = 100.0
+        check("fraction uses min and max", Bars.fraction(bar) == 0.5)
+        bar.props["maxValue"] = 50.0; check("backwards range counts as empty", Bars.fraction(bar) == 0.0)
+        bar.props["direction"] = "up"; bar.props["maxValue"] = 150.0
+        check("direction is passed on", Bars.fillOf(fill)?.second == "up")
+        val loose = t.create("Sprite", "Loose"); t.add(root, loose)
+        check("sprites outside a bar are untouched", Bars.fillOf(loose) == null)
+        bar.script = "scripts/missing.nbs"; check("a bar without a known script has no roles", Bars.emptySprite(bar) == null && Bars.fillOf(fill) == null)
+        // a script that inherits the roles of another one
+        val bar2 = t.create("DynamicBar", "Bar2"); bar2.script = "scripts/big.nbs"; t.add(root, bar2)
+        val back2 = t.create("Sprite", "Back"); t.add(bar2, back2)
+        check("roles are inherited from the base script", Bars.emptySprite(bar2) === back2 && Bars.rolesOf(bar2)?.full == "../Other")
+        Bars.register(emptyList())
+    }
+
+    // --- Buttons that look like their Sprite children keep working as buttons
+    run {
+        val files = HashMap<String, String>()
+        files["b.nscn"] = "scene \"b\"\nnode R Node2D\n\tnode Pad Button\n\t\taction = \"left\"\n\t\tfixed = true\n\t\tx = 100\n\t\ty = 100\n\t\twidth = 80\n\t\theight = 80\n\t\tnode Look Sprite\n\t\t\timage = \"assets/pad.png\"\n"
+        val e = Engine({ files[it] }, emptyMap(), FakeHost(), { })
+        check("button with a Sprite child loads", e.loadScene("b.nscn"))
+        val pad = e.tree.find(e.tree.root!!, "/R/Pad")!!
+        check("the Sprite is a child of the button", pad.children.singleOrNull()?.type == "Sprite")
+        e.setPointers(listOf(100.0 to 100.0)); check("button with a Sprite child still counts as pressed", e.input.isDown("left"))
+        e.setPointers(emptyList()); check("button released", !e.input.isDown("left"))
+        check("fixed carries over to the Sprite", pad.children[0].isFixed())
+    }
+
+    // --- opening a folder or a zip as a project
+    run {
+        val base = File(tmp, "import").also { it.deleteRecursively(); it.mkdirs() }
+        val root = File(base, "NebulaProjects")
+        fun zipOf(entries: Map<String, String>): ByteArray {
+            val bo = java.io.ByteArrayOutputStream()
+            java.util.zip.ZipOutputStream(bo).use { z -> for ((n, t) in entries) { z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(t.toByteArray()); z.closeEntry() } }
+            return bo.toByteArray()
+        }
+        // a zip with everything inside one wrapper folder, a stale build and junk from another system
+        val wrapped = zipOf(mapOf(
+            "My Game/project.nebula" to "title=Space Shooter\nscene=scenes/level1.nscn\n", "My Game/scenes/level1.nscn" to "scene \"L1\"\nnode R Node2D\n",
+            "My Game/scripts/a.nbs" to "script A of Node2D:\n\tpass\n", "My Game/assets/x.txt" to "hi", "My Game/build/libscripts.so" to "old",
+            "__MACOSX/My Game/._a" to "junk", "My Game/.git/config" to "x"))
+        val p1 = ProjectImport.importZip(wrapped.inputStream(), root, "download.zip", File(base, "scratch"))
+        check("zip: opened inside the projects folder under its title", p1.dir.parentFile == root && p1.dir.name == "Space Shooter" && p1.title == "Space Shooter", p1.dir.path)
+        check("zip: files arrive", p1.readText("scripts/a.nbs") != null && p1.readText("assets/x.txt") == "hi" && p1.mainScene == "scenes/level1.nscn" && p1.readText(p1.mainScene) != null)
+        check("zip: stale build and junk are dropped", !p1.file("build").exists() && !p1.file(".git").exists() && !File(root, "__MACOSX").exists())
+        check("zip: scratch folder is cleaned up", File(base, "scratch").listFiles().orEmpty().isEmpty())
+        val p2 = ProjectImport.importZip(wrapped.inputStream(), root, "download.zip", File(base, "scratch"))
+        check("zip: opening it again gets its own folder", p2.dir.name == "Space Shooter 2" && p1.dir.exists())
+        check("zip: it is listed like any project", root.listFiles { f -> File(f, "project.nebula").exists() }!!.size == 2)
+        // a zip of just the folders, no project.nebula, no wrapper
+        val bare = zipOf(mapOf("scenes/intro.nscn" to "scene \"I\"\nnode R Node2D\n", "scripts/b.nbs" to "script B of Node2D:\n\tpass\n"))
+        val p3 = ProjectImport.importZip(bare.inputStream(), root, "cool-game.zip", File(base, "scratch"))
+        check("zip without project.nebula gets one", p3.dir.name == "cool-game" && File(p3.dir, "project.nebula").isFile && p3.title == "cool-game")
+        check("zip without a main.nscn uses the scene it has", p3.mainScene == "scenes/intro.nscn" && p3.file("assets").isDirectory && p3.file("animations").isDirectory)
+        check("an unsafe zip is refused", runCatching { ProjectImport.importZip(zipOf(mapOf("../evil.txt" to "x")).inputStream(), root, "bad.zip", File(base, "scratch")) }.exceptionOrNull() is ProjectImport.ImportException && !File(base, "evil.txt").exists())
+        check("an empty zip is refused", runCatching { ProjectImport.importZip(zipOf(emptyMap()).inputStream(), root, "e.zip", File(base, "scratch")) }.exceptionOrNull() is ProjectImport.ImportException)
+        check("something that is not a zip is refused", runCatching { ProjectImport.importZip("hello".byteInputStream(), root, "n.zip", File(base, "scratch")) }.isFailure)
+        // a folder
+        val src = File(base, "elsewhere/Platformer").also { it.mkdirs() }
+        File(src, "scenes").mkdirs(); File(src, "scenes/main.nscn").writeText("scene \"M\"\nnode R Node2D\n"); File(src, "build").mkdirs(); File(src, "build/x.so").writeText("old")
+        File(src, "assets/deep").mkdirs(); File(src, "assets/deep/build").mkdirs(); File(src, "assets/deep/build/keep.txt").writeText("keep")
+        val p4 = ProjectImport.importFolder(src, root)
+        check("folder: copied under its own name", p4.dir.name == "Platformer" && p4.dir != src && p4.readText("scenes/main.nscn") != null && src.exists())
+        check("folder: only the top-level build is skipped", !p4.file("build").exists() && p4.readText("assets/deep/build/keep.txt") == "keep")
+        val again = ProjectImport.importFolder(p4.dir, root)
+        check("a project already in the projects folder is opened where it is", again.dir == p4.dir && root.listFiles()!!.count { it.name.startsWith("Platformer") } == 1)
+        check("a file is not a folder", runCatching { ProjectImport.importFolder(File(src, "scenes/main.nscn"), root) }.exceptionOrNull() is ProjectImport.ImportException)
+    }
+
+    // --- DynamicBar script API compiles with snc and the bar scene loads
+    run {
+        val bp = Project.create(File(tmp, "bars"), "Bars", preset = Preset.BLANK)
+        File(bp.dir, "scenes/main.nscn").writeText("scene \"S\"\nnode World Node2D\n\tnode Life DynamicBar\n\t\tx = 100\n\t\ty = 40\n\t\tmaxValue = 50\n\t\tvalue = 50\n\t\tnode Back Sprite\n\t\tnode Fill Sprite\n\t\tscript = \"scripts/life.nbs\"\n")
+        File(bp.dir, "scripts/life.nbs").writeText("script Life of DynamicBar:\n\tempty @Back\n\tfull @Fill\n\tfn onReady():\n\t\tsetRange(0.0, 200.0)\n\t\tsetValue(150.0)\n\t\tdrain(10.0)\n\t\tfill(5.0)\n\t\tsetMax(300.0)\n\t\tsetMin(10.0)\n\t\tlog(percent())\n\t\tif isFull():\n\t\t\temptyOut()\n\t\tif isEmpty():\n\t\t\tfillUp()\n\t\tlog(value())\n\t\tlog(minValue())\n\t\tlog(maxValue())\n\t\tsetDirection(\"up\")\n")
+        File(bp.dir, "scripts/hud.nbs").writeText("script Hud of Node2D:\n\tfn onReady():\n\t\t(@Life as DynamicBar).drain(1.0)\n\t\t(@/World/Life as DynamicBar).fill(2.0)\n")
+        val r = Builder(bp, ProcessRunner(), apiDir.absoluteFile, snc).build()
+        check("DynamicBar API compiles with snc", r.ok, r.messages.joinToString("\n     "))
+        val e = Engine({ bp.readText(it) }, emptyMap(), FakeHost(), { })
+        check("bar scene loads", e.loadScene("scenes/main.nscn"))
+        val life = e.tree.find(e.tree.root!!, "/World/Life")!!
+        check("bar has value, min and max", life.f("value") == 50.0 && life.f("minValue") == 0.0 && life.f("maxValue") == 50.0 && life.children.size == 2)
+        Bars.register(emptyList())
+    }
+
+    // --- sprite editor: tools, undo/redo, frames, onion skin, sheets
+    run {
+        val red = 0xFFFF0000.toInt(); val blue = 0xFF0000FF.toInt()
+        fun px(d: SpriteDoc, x: Int, y: Int) = d.frame[y * d.width + x]
+        fun count(d: SpriteDoc) = d.frame.count { it != 0 }
+        val d = SpriteDoc.blank(16, 16)
+        // pixel brush
+        var st = d.stroke(SpriteDoc.Brush(1, 1f, red, pixel = true)); st.dab(3, 4); st.dab(4, 4)
+        check("nothing changes before commit", count(d) == 0); check("commit paints", st.commit() && px(d, 3, 4) == red && px(d, 4, 4) == red && count(d) == 2)
+        st = d.stroke(SpriteDoc.Brush(2, 1f, blue, pixel = true)); st.dab(8, 8); st.commit()
+        check("pixel brush size 2 is a hard 2x2 block", count(d) == 6 && px(d, 8, 8) == blue && px(d, 9, 9) == blue && px(d, 7, 7) == 0 && px(d, 10, 10) == 0)
+        st = d.stroke(SpriteDoc.Brush(3, 1f, blue, pixel = true)); st.dab(12, 12); st.commit()
+        check("pixel brush size 3 is centred", px(d, 11, 12) == blue && px(d, 13, 12) == blue && px(d, 12, 11) == blue && px(d, 10, 12) == 0)
+        check("an empty stroke records nothing", d.stroke(SpriteDoc.Brush(1, 1f, red, true)).commit() == false)
+        // undo / redo
+        val n = count(d)
+        d.undo(); check("undo", count(d) < n && d.canRedo); d.redo(); check("redo", count(d) == n)
+        st = d.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.dab(0, 0); st.commit(); check("a new stroke clears redo", !d.canRedo)
+        // opacity does not build up inside one stroke, but does across strokes
+        val o = SpriteDoc.blank(8, 8)
+        st = o.stroke(SpriteDoc.Brush(1, 0.5f, red, true)); st.dab(2, 2); st.dab(2, 2); st.dab(2, 2); st.commit()
+        val once = px(o, 2, 2); check("opacity 50% gives half alpha", Argb.a(once) in 127..128 && Argb.r(once) == 255)
+        st = o.stroke(SpriteDoc.Brush(1, 0.5f, red, true)); st.dab(2, 2); st.commit()
+        check("a second stroke adds up", Argb.a(px(o, 2, 2)) > Argb.a(once))
+        // regular brush is soft
+        val soft = SpriteDoc.blank(16, 16)
+        st = soft.stroke(SpriteDoc.Brush(7, 1f, red, pixel = false)); st.dab(8, 8); st.commit()
+        check("regular brush has soft edges", Argb.a(px(soft, 8, 8)) == 255 && soft.frame.any { Argb.a(it) in 1..254 })
+        // eraser
+        st = soft.stroke(SpriteDoc.Brush(3, 1f, 0, pixel = true, erase = true)); st.dab(8, 8); st.commit()
+        check("eraser clears pixels", px(soft, 8, 8) == 0 && px(soft, 8, 9) == 0)
+        // line, rect, ellipse
+        val sh = SpriteDoc.blank(20, 20)
+        st = sh.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.line(1, 1, 10, 4); st.commit()
+        check("line reaches both ends", px(sh, 1, 1) == red && px(sh, 10, 4) == red && count(sh) == 10)
+        val r = SpriteDoc.blank(20, 20)
+        st = r.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.rect(2, 2, 6, 5, filled = false); st.commit()
+        check("rectangle outline", px(r, 2, 2) == red && px(r, 6, 5) == red && px(r, 4, 3) == 0 && count(r) == 14)
+        st = r.stroke(SpriteDoc.Brush(1, 1f, blue, true)); st.rect(10, 10, 12, 12, filled = true); st.commit()
+        check("filled rectangle", px(r, 11, 11) == blue && px(r, 10, 12) == blue)
+        st = r.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.rect(5, 18, 2, 15, filled = true); st.commit()
+        check("shape corners can be dragged any way", px(r, 3, 16) == red)
+        val e = SpriteDoc.blank(20, 20)
+        st = e.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.ellipse(2, 2, 13, 9, filled = true); st.commit()
+        check("filled ellipse is round", px(e, 8, 6) == red && px(e, 2, 2) == 0 && px(e, 13, 9) == 0 && px(e, 2, 5) == red)
+        val eo = SpriteDoc.blank(20, 20)
+        st = eo.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.ellipse(2, 2, 13, 9, filled = false); st.commit()
+        check("ellipse outline is hollow", px(eo, 7, 5) == 0 && count(eo) > 20 && eo.frame.indices.any { eo.frame[it] == red })
+        // a shape can be dragged: reset redraws from the picture as it was
+        val dr = SpriteDoc.blank(12, 12)
+        st = dr.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.rect(1, 1, 8, 8, false); st.reset(); st.rect(1, 1, 3, 3, false); st.commit()
+        check("reset redraws a dragged shape", px(dr, 8, 8) == 0 && px(dr, 3, 3) == red)
+        // fill
+        val f = SpriteDoc.blank(10, 10)
+        st = f.stroke(SpriteDoc.Brush(1, 1f, red, true)); st.rect(2, 2, 7, 7, false); st.commit()
+        check("fill inside", f.fill(4, 4, blue, 1f) && px(f, 4, 4) == blue && px(f, 3, 3) == blue && px(f, 2, 2) == red && px(f, 0, 0) == 0)
+        check("fill stops at the outline", px(f, 8, 8) == 0 && f.frame.count { it == blue } == 16)
+        check("fill with the same colour does nothing", !f.fill(4, 4, blue, 1f))
+        check("fill outside the picture does nothing", !f.fill(-1, 0, blue, 1f) && !f.fill(10, 10, blue, 1f))
+        check("fill outside the box", f.fill(0, 0, red, 1f) && px(f, 9, 9) == red && px(f, 4, 4) == blue)
+        val ft = SpriteDoc.blank(4, 1); ft.frame.also { }
+        run { val s2 = ft.stroke(SpriteDoc.Brush(1, 1f, 0xFF808080.toInt(), true)); s2.dab(1, 0); s2.commit() }
+        check("fill tolerance", ft.fill(1, 0, red, 1f, tolerance = 0) && px(ft, 1, 0) == red)
+        val half = SpriteDoc.blank(3, 1); half.fill(0, 0, red, 0.5f)
+        check("fill with opacity", Argb.a(px(half, 1, 0)) in 127..128)
+        check("undo a fill", f.canUndo.also { f.undo() } && px(f, 9, 9) == 0)
+        // eyedropper
+        check("eyedropper", f.pick(2, 2) == red && f.pick(0, 0) == 0 && f.pick(-1, 0) == null && f.pick(10, 0) == null)
+        // frames
+        val a = SpriteDoc.blank(4, 4)
+        run { val s2 = a.stroke(SpriteDoc.Brush(1, 1f, red, true)); s2.dab(0, 0); s2.commit() }
+        a.addFrame(copy = true); check("copied frame is selected and equal", a.frameCount == 2 && a.current == 1 && a.frame[0] == red)
+        run { val s2 = a.stroke(SpriteDoc.Brush(1, 1f, blue, true)); s2.dab(1, 1); s2.commit() }
+        check("frames are independent", a.frames[0][5] == 0 && a.frames[1][5] == blue)
+        a.addFrame(copy = false); check("blank frame", a.frameCount == 3 && a.frame.all { it == 0 })
+        a.moveFrame(-1); check("move frame", a.current == 1 && a.frames[1].all { it == 0 } && a.frames[2][5] == blue)
+        a.undo(); check("undo a frame move", a.current == 2 && a.frames[1][5] == blue)
+        a.undo(); check("undo adding a frame", a.frameCount == 2)
+        a.select(0); a.deleteFrame(); check("delete frame", a.frameCount == 1 && a.frame[5] == blue)
+        a.deleteFrame(); check("the last frame cannot be deleted", a.frameCount == 1)
+        a.clearFrame(); check("clear frame", a.frame.all { it == 0 }); a.undo(); check("undo clear", a.frame[5] == blue)
+        // onion skin
+        val on = SpriteDoc(2, 2, listOf(IntArray(4), IntArray(4), IntArray(4), IntArray(4)))
+        on.select(0); check("no earlier frame at the start", on.onion(1, 1, wrap = false).map { it.index } == listOf(1))
+        check("looping onion wraps", on.onion(1, 1, wrap = true).map { it.index }.sorted() == listOf(1, 3))
+        on.select(2); val ol = on.onion(2, 1, false)
+        check("onion before and after, fading", ol.map { it.offset } == listOf(-1, -2, 1) && ol[0].alpha > ol[1].alpha)
+        check("one frame has no onion", SpriteDoc.blank(2, 2).onion(2, 2, true).isEmpty())
+        val g = Argb.ghost(intArrayOf(red, 0), 0xFF00FF00.toInt(), 0.4f)
+        check("ghost frames are tinted and faint", Argb.a(g[0]) == 102 && Argb.g(g[0]) > 0 && g[1] == 0)
+        // sheets
+        val sd = SpriteDoc(2, 2, listOf(intArrayOf(1, 1, 1, 1), intArrayOf(2, 2, 2, 2), intArrayOf(3, 3, 3, 3)))
+        val (sp, sw, shh) = sd.toSheet()
+        check("sheet layout, one row", sw == 6 && shh == 2 && sp[0] == 1 && sp[2] == 2 && sp[4] == 3)
+        val (sp2, sw2, sh2) = sd.toSheet(2)
+        check("sheet layout, two columns", sw2 == 4 && sh2 == 4 && sp2[2] == 2 && sp2[8] == 3 && sp2[10] == 0)
+        val back = SpriteDoc.fromSheet(sp, sw, shh, 3, 1)
+        check("sheet round trip", back.frameCount == 3 && back.width == 2 && back.frames[1][0] == 2 && back.frames[2][3] == 3)
+        check("a bad grid keeps one frame", SpriteDoc.fromSheet(IntArray(6), 3, 2, 5, 1).frameCount == 1)
+        check("colour hex", Argb.parse("#FF8000") == 0xFFFF8000.toInt() && Argb.parse("80FF8000") == 0x80FF8000.toInt() && Argb.parse("zz") == null && Argb.hex(0xFFFF8000.toInt()) == "#FF8000" && Argb.parse(Argb.hex(0x80FF8000.toInt())) == 0x80FF8000.toInt())
+        check("undo history is capped", run { val c = SpriteDoc.blank(2, 2); repeat(SpriteDoc.MAX_UNDO + 20) { c.clearFrame() }; var k = 0; while (c.canUndo) { c.undo(); k++ }; k == SpriteDoc.MAX_UNDO })
+    }
+
     println(if (failures == 0) "\nALL PASSED" else "\n$failures FAILED")
     System.exit(if (failures == 0) 0 else 1)
 }

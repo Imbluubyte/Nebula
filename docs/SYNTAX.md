@@ -138,6 +138,13 @@ A Body (so everything below Body applies) made to be spawned many times. Propert
 Callable from any script: `spawnBody(scene, parent, x, y) -> SpawnableBody` (the scene root must be a SpawnableBody), `spawnBurst(scene, parent, x, y, count, speed, startAngle = 0.0)`,
 `spawnRing(scene, parent, x, y, count, radius, startAngle = 0.0)` (both return the list of bodies), `countTagged(label)`, `nearest(label, x, y) -> Node2D` (throws when nothing is tagged).
 
+### DynamicBar
+A bar that fills itself from `value`, `minValue` and `maxValue` (floats, defaults 100, 0, 100) with no picture of its own. Two lines at the top of its script (one tab in, not inside a function) name its sprites:
+`empty @Back` is the Sprite that shows the empty bar (with its border), `full @Fill` the Sprite that shows the full bar (no border); the full sprite is cropped to the fraction `(value - minValue) / (maxValue - minValue)`.
+Paths are relative to the bar (`@Frame/Fill`, `@^/Other`). They only work in a script of DynamicBar (or a script that extends one, which inherits them).
+`setValue(v) value() fill(n) drain(n) fillUp() emptyOut() setMin(v) setMax(v) setRange(lo, hi) minValue() maxValue() percent() isFull() isEmpty() direction() setDirection("right"|"left"|"up"|"down")`.
+`setValue` clamps to the range; `setMin`/`setMax`/`setRange` re-clamp the value. (`empty()` is called `emptyOut()` because `empty` is the sprite line.)
+
 ### Shape, Label, Body, Camera
 Shape: `color() setColor("#RRGGBB") width() height() setSize(w, h)`.
 Label: `text() setText(x) setColor(hex) setFontSize(n)`.
@@ -154,7 +161,8 @@ Camera: `setZoom(z) zoom() followNode(node) followTag(tag) stopFollowing() isFol
 | Sprite | `image flipX width height` and for sheets: `hframes vframes frame`; for animation: `animations animation playing speed` |
 | Shape | `shape (rect or circle) width height color` |
 | Label | `text fontSize color` |
-| Button | `text width height fontSize color action` |
+| Button | `text width height fontSize color action` (with Sprite children it looks like them) |
+| DynamicBar | `value minValue maxValue direction` (right, left, up, down) |
 | Body | `vx vy gravity width height solid static bounce color` |
 | SpawnableBody | everything of Body, plus `lifetime health maxHealth damage` |
 | TileMap | `image tileWidth tileHeight hframes vframes columns rows solid solidTiles tiles` |

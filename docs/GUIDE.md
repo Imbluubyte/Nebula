@@ -13,6 +13,13 @@ written in SuperNova (plus a few Nebula additions), press **Run**, and export an
 
 Projects without scripts need none of the Termux steps. Scripts are compiled to native code by Termux when you press Run/Build.
 
+### Opening a folder or a zip
+
+On the first screen (or from the command palette) **Open folder** and **Open zip** bring a project that lives somewhere else into Nebula. The files are copied into the
+projects folder (the project is found even when a zip wraps everything in one folder, and a missing `project.nebula` or main scene is filled in), a stale `build/` and
+`.git` data are left out, and the copy opens like any project. From then on you edit that copy and **every change is saved to it automatically** (every few seconds,
+when you leave the app, and when you run). Opening the same zip again makes another copy (`Name 2`); the original folder or zip is never touched.
+
 ### Starting a project
 
 **New project** asks you to pick a preset. Every preset is an ordinary project you can change freely.
@@ -30,6 +37,7 @@ Its numbers (`tweak speed`, `tweak jumpPower`) are also editable in the Inspecto
 
 * **Files tab**: folders for scenes, scripts, animations and assets. Use the folder buttons to create folders (and subfolders); tap a folder to
   make it the target for imports, new scenes, new scripts and new animation sets. Tap a sound to hear it.
+* **Sprite editor**: tap an image in the Files tab, the brush icon (new sprite), or **Edit in sprite editor** under a Sprite's `image`. See "Drawing sprites" below.
 * **Left**: the scene tree (and a Files tab). A script appears as a row *under* its node. Tap to select, long-press to rename,
   the buttons above the tree add scripts, duplicate, move, indent/outdent and delete.
 * **Centre**: the scene view (1 finger on a node drags it, on empty space pans, 2 fingers pan/zoom; buttons for zoom, grid, snap),
@@ -53,7 +61,8 @@ Every node has a name and a type. Node names are unique among siblings. Paths: `
 | Sprite | picture or animated sprite sheet | image, flipX, width, height, hframes, vframes, frame, animations, animation, playing, speed |
 | Shape | rectangle or circle | shape, width, height, color |
 | Label | text | text, fontSize, color |
-| Button | on-screen button | text, width, height, color, **action** |
+| Button | on-screen button; add **Sprite** children and it looks like them (the colour and text are then not drawn); width and height are still the tap area | text, width, height, color, **action** |
+| DynamicBar | a bar that fills by itself, like Godot's ProgressBar; no look of its own, see "DynamicBar" below | value, minValue, maxValue, direction |
 | Body | moving thing with collisions | vx, vy, gravity, width, height, solid, static, bounce, color |
 | CollisionBox | a hitbox: as a child of a Body or SpawnableBody it replaces the body's own width x height box (x, y = offset from the body, first one wins; scale ignored). Script: `width() height() setSize(w, h)` | width, height |
 | SpawnableBody | a Body made to be spawned many times (bullets, enemies, pickups) | everything a Body has, plus lifetime, health, maxHealth, damage |
@@ -65,6 +74,31 @@ Positions are in game units (project size, default 1280x720, y grows downward) a
 A **Button with an `action`** (`left`, `right`, `up`, `down`, `jump`, `action`) counts as that action while held: scripts read it with `isDown("left")` /
 `axis("left", "right")`. The keyboard (arrows/WASD, space, Z) feeds the same actions.
 **Body**: gravity pulls it down; a body that is `solid` and `static` is ground that other bodies stand on (`onGround()` becomes true).
+
+### DynamicBar: health bars, loading bars
+
+A DynamicBar fills itself from its `value`: `(value - minValue) / (maxValue - minValue)`. It has **no default appearance**. You give it two **Sprite** children
+(anywhere below it) and say in its script which is which:
+
+* the **empty bar**: the whole bar *with* its border (always shown)
+* the **full bar**: the bar when full, *without* a border (cropped to the value, on top of the empty bar)
+
+Make both pictures the same size and line the two sprites up (same x and y). Then attach a script to the bar:
+
+```
+script Health of DynamicBar:
+	empty @Back
+	full @Fill
+
+	fn onReady():
+		setValue(75.0)
+```
+
+`empty @Back` and `full @Fill` take any node path relative to the bar (`@Frame/Fill`, `@^/Other` for a sibling). The `minValue`, `maxValue` and `value` are in the Inspector
+(defaults 0, 100, 100) and can be changed from scripts. `direction` (right, left, up, down) is the side the bar grows from.
+Calls: `setValue(v) value() fill(n) drain(n) fillUp() emptyOut() setMin(v) setMax(v) setRange(lo, hi) minValue() maxValue() percent() isFull() isEmpty() setDirection(side)`.
+`setValue` keeps the value between the minimum and the maximum, and changing the minimum or maximum keeps the value inside the new range.
+To change a bar from another script cast its node: `(@/Hud/Health as DynamicBar).drain(10.0)`.
 
 ### Camera: zoom, following, smoothing, limits
 
@@ -172,6 +206,21 @@ Moving: angles are degrees, 0 = right, 90 = down. `launch(angle, speed)` sets th
 `angleTo(x, y)` gives the angle to a point, and `chase(node, speed)` walks straight at a node (call it from `onFrame`, e.g. an enemy following the player).
 Finding targets: `countTagged("enemy")` and `nearest("enemy", x(), y())` (the closest tagged node; check the count first, it fails when there is none).
 Broadcasts: `expired`, `died`, `damaged(amount)`. Spawned bodies are placed in the same space as the parent you pass, so spawn under a container such as `World`, not under a moving node.
+
+### Drawing sprites
+
+The built-in sprite editor draws pixel art and regular pictures (PNG). Open it from the Files tab (brush icon = new sprite, tap an image = edit it), from the Inspector
+(**Edit in sprite editor** under a Sprite's `image`) or the command palette. One finger uses the tool, two fingers pan and zoom (mouse wheel zooms).
+
+* **Tools**: brush, eraser, fill (paint bucket), eyedropper (picks the colour under your finger), line, rectangle and ellipse (outline or filled).
+* **Brush size and opacity**: two sliders. **Pixel brush** is hard edged, **Soft brush** is anti-aliased. Opacity does not build up inside one stroke.
+* **Colour**: hue / saturation / brightness sliders, a hex field, a 16 colour palette and your recent colours.
+* **Undo / redo**: every stroke, shape, fill and frame change is one step.
+* **Frames and onion skin**: add a blank or copied frame, delete, move and clear frames. **Onion skin** shows the frames before (red) and after (green) the current one
+  faintly, so each drawing lines up with its neighbours; *Before* / *After* set how many, *Loops* treats the animation as a loop. **Play** previews the animation.
+* **Saving**: automatic (every few seconds and on Done). Frames are saved as one PNG sheet, frames side by side. A sheet that an animation set (`.nanim`) describes opens as its
+  frames and keeps that grid; a new animated sprite gets an animation set with a clip `all` (all frames, 8 fps, loops), and an existing set's grid follows the frame count.
+  A JPG or WebP opens too, but is saved as a PNG next to the original.
 
 ### Sounds and animation
 * **Sound effects**: import `.wav`/`.ogg`/`.mp3` files, then call `play("assets/hit.wav")` from a script, or add a **Sound** node (volume, pitch, loop, autoplay)

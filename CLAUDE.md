@@ -61,6 +61,10 @@ The app module has two flavors. **editor** (`app/src/editor`): Studio, ui, build
 | camera (zoom, follow, smoothing, per-axis follow, offset, limits) and `fixed` HUD nodes | `Engine.updateCamera/toWorld` (state `camX camY camZoom`, runs every frame after physics; `setPointers`/`tap` take SCREEN coordinates), `NodeTypes.kt` (Camera props, `fixed` on Node2D), `SceneNode.isFixed`, drawing in `runtime/GameView.kt` (world pass through the camera, fixed pass on top), script API `class Camera` in `api/nebula.sn`, target picker in `ui/InspectorPanel.kt` |
 | TileMap (tiles, collisions, painter, script API) | `core/.../TileGrid.kt` (cell storage, `of`/`sync`/`apply`/`cellAt`), `NodeTypes.kt`, `Engine.physics/tileCollide` + `apiGet/apiSet` ("tile:col,row" props), `api/nebula.sn` (`class TileMap`), drawing `Renderer.drawTiles`, painter: `Studio.paintPath/paintTile`, `ui/TilePalette.kt`, gesture in `ui/ViewportPanel.kt`, button in `ui/InspectorPanel.kt` ("tiles" hint) |
 | SpawnableBody (lifetime, health, launch/chase, spawnBody/Burst/Ring) | `NodeTypes.kt` (type + `bodyTypes`), `Engine.serviceSpawnables` (lifetime), `api/nebula.sn` (`class SpawnableBody`, spawn helpers on `Node`); physics treats every type in `NodeTypes.bodyTypes` as a Body |
+| DynamicBar (progress-bar node, sprite roles `empty @X` / `full @X` in its script) | `core/.../Bars.kt` (roles registry, fraction, `fillOf`), `NodeTypes.kt`, `Transpiler.scan` + `barRe` (metadata `barEmpty/barFull`, `MetaFile` line `bar`), `Engine` registers roles at start and `Studio.lint` in the editor, crop in `Renderer` (`"Sprite"` case), `api/nebula.sn` (`class DynamicBar`), direction buttons in `ui/InspectorPanel.kt` |
+| Button that looks like Sprite children | `Renderer` (`"Button"` case draws nothing of its own when it has a Sprite child); children are ordinary Sprites, so `fixed` and input need nothing else |
+| open a folder / zip as a project, autosave | `core/.../ProjectImport.kt` (unzip safely, find the project root, copy into the projects folder), `Studio.openFolderUri/openZipUri/runImport` + `MainActivity` pickers + `WelcomeScreen` buttons; autosave loop `Studio.autosave` (4 s) |
+| sprite editor (draw, frames, onion skin) | `core/.../SpriteDoc.kt` (pixels, tools, undo, frames, onion, sheets; Android-free, tested), `app/.../SpriteSession.kt` (toolbar state + finger handling), `ui/SpriteEditor.kt` (canvas, panels, new-sprite dialog), `Studio.openSprite/newSprite/saveSprite/syncAnimations` |
 | CollisionBox (hitbox child of a body) | `NodeTypes.kt`, `Engine.hitbox` (used by `physics` and `tileCollide`), `api/nebula.sn` (`class CollisionBox`), editor outline in `Renderer` |
 | editor state, project open/save, run/stop/build/export orchestration | `app/.../Studio.kt` (single state holder; panels read it) |
 | commands + keyboard shortcuts + palette list | `app/.../Commands.kt` |
@@ -97,7 +101,7 @@ Paths in this file written `app/.../` mean `app/src/editor/java/com/nebula/studi
 * Selection is stored as a node *path* (ids change after undo rebuilds the tree).
 * Engine runs on the UI thread; builds/exports run on a worker thread and post back through `Studio.post`.
 * Scripts are native code: a change needs a rebuild (Termux + `snc`); no hot reload. Loading a rebuilt `.so` uses a fresh file name.
-* Untested on a real device: Termux build bridge, JNA host, APK signing + install (CI proves compile, manifest patch, alignment).
+* Untested on a real device: sprite editor gestures, folder/zip pickers, Termux build bridge, JNA host, APK signing + install (CI proves compile, manifest patch, alignment).
 * World position = sum of ancestors' x/y; rotation and scale are not inherited (document if that changes).
 
 ## Status
@@ -106,6 +110,7 @@ Done: node/scene system, `.nscn` format, editor UI (tree with scripts, viewport,
 palette, shortcuts), Nebula script layer, broadcasts, onFrame/onTick/onEvery, simple physics, run in editor, APK export,
 CI, folders in the Files panel, sprite sheet animation manager + Sound node controls, FPS counter, slim player APK for exports, export to Downloads,
 SpawnableBody node, new-project presets (platformer / top down / blank), TileMap node (painter, solid tiles, script API), camera controls (zoom, follow, smoothing, per-axis, offset, limits) and `fixed` nodes.
+DynamicBar node, Button skinned by Sprite children, open folder / zip as a project with autosave, built-in sprite editor (brush size + opacity, fill, colour picker, shapes, eyedropper, undo/redo, frames + onion skin, saved as a PNG sheet + `.nanim`).
 CollisionBox node, node copy/cut/paste + Delete/Esc/zoom shortcuts (`Studio.nodeClipboard`, `Commands.inScene`, `TextFocus` in Theme.kt), mouse wheel zoom + middle-drag pan, script variables that start from other variables (`Transpiler.deferFieldStarts`: set in the generated constructor because SuperNova field initialisers cannot see other fields).
 Gotcha: new `Button` nodes get `fixed = true` from `SceneEditor.addNode`; `fixed` is false by default everywhere else, so old scenes behave as before.
 Known limit: physics checks every body pair each frame (fine for ~1000 bodies, a spatial grid is the next step if a game needs more).
