@@ -36,6 +36,8 @@ object Commands {
         Command("up", "Move node up", "Ctrl+Up", ::hasNode) { it.moveSelected(-1) },
         Command("down", "Move node down", "Ctrl+Down", ::hasNode) { it.moveSelected(1) },
         Command("newScene", "New scene...", null, ::hasProject) { it.modal = Modal.NewScene },
+        Command("newSprite", "New sprite...", null, ::hasProject) { it.modal = Modal.NewSprite },
+        Command("editSprite", "Edit sprite of selected node", null, { s -> s.selected()?.let { it.type == "Sprite" && it.s("image").isNotEmpty() } == true }) { s -> s.selected()?.let { s.openSprite(it.s("image")) } },
         Command("viewScene", "Show scene", "Ctrl+1", ::hasProject) { it.centerTab = CenterTab.Scene; it.panel = Panel.Viewport },
         Command("viewScript", "Show script editor", "Ctrl+2", { it.scripts.isNotEmpty() }) { it.centerTab = CenterTab.Script; it.panel = Panel.Script },
         Command("viewGame", "Show game", "Ctrl+3", { it.game != null }) { it.centerTab = CenterTab.Game },
@@ -51,6 +53,8 @@ object Commands {
         Command("settings", "Project settings", "Ctrl+,", ::hasProject) { it.modal = Modal.Settings },
         Command("palette", "Command palette", "Ctrl+Shift+P", { true }) { it.modal = Modal.Palette },
         Command("help", "Help and shortcuts", "F1", { true }) { it.modal = Modal.Help },
+        Command("openFolder", "Open folder as project...", null, { true }) { it.openFolder() },
+        Command("openZip", "Open zip as project...", null, { true }) { it.openZip() },
         Command("close", "Close project", null, ::hasProject) { it.closeProject() },
     )
 

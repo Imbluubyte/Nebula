@@ -69,6 +69,7 @@ fun FilesPanel(studio: Studio, modifier: Modifier = Modifier) {
             IconBtn(Icons.Default.CreateNewFolder, "New folder", { studio.modal = Modal.NewFolder(selected ?: "assets") }, size = 36.dp)
             IconBtn(Icons.Default.NoteAdd, "New scene", { studio.modal = Modal.NewScene }, size = 36.dp)
             IconBtn(Icons.Default.Movie, "New animation set (sprite sheet)", { studio.modal = Modal.NewAnimation }, size = 36.dp)
+            IconBtn(Icons.Default.Brush, "New sprite (opens the sprite editor)", { studio.modal = Modal.NewSprite }, size = 36.dp)
             IconBtn(Icons.Default.FileUpload, "Import asset (image or sound)", { studio.importAsset() }, size = 36.dp)
         }
         if (selected != null) Text("Selected: $selected/  (imports, new scenes and new scripts go here)", color = C.dim, fontSize = 11.sp,

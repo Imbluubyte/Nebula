@@ -1,11 +1,14 @@
 package com.nebula.studio
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -99,6 +102,8 @@ sealed class Modal {
     class Rename(val path: String) : Modal()
     class NewFolder(val parent: String) : Modal()
     object NewAnimation : Modal()
+    object NewSprite : Modal()
+    object Sprite : Modal()
     object Animation : Modal()
     class Confirm(val message: String, val action: () -> Unit) : Modal()
     class Pick(val title: String, val options: List<String>, val onPick: (String) -> Unit) : Modal()
@@ -159,6 +164,7 @@ class Studio(val ctx: Context) {
 
     // ---- assets and the animation manager
     var animDoc by mutableStateOf<AnimDoc?>(null)
+    var sprite by mutableStateOf<SpriteSession?>(null)   // the picture open in the sprite editor
     private var preview: Sounds? = null
 
     fun previewSound(path: String) {
@@ -171,6 +177,82 @@ class Studio(val ctx: Context) {
     fun openAsset(path: String) {
         val l = path.lowercase()
         if (l.endsWith(".wav") || l.endsWith(".ogg") || l.endsWith(".mp3")) previewSound(path)
+        else if (listOf(".png", ".jpg", ".jpeg", ".webp").any { l.endsWith(it) }) openSprite(path)
+    }
+
+    // ------------------------------------------------------------------ sprite editor
+    private fun isImage(path: String) = listOf(".png", ".jpg", ".jpeg", ".webp").any { path.lowercase().endsWith(it) }
+
+    /** Opens an image of the project in the sprite editor. A sheet that an animation set describes opens as its frames. */
+    fun openSprite(path: String) {
+        val p = project ?: return
+        closeSprite()
+        try {
+            val bytes = p.file(path).takeIf { it.isFile }?.readBytes() ?: throw java.io.IOException("file not found")
+            val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw java.io.IOException("not a picture Android can read")
+            if (bmp.width > 2048 || bmp.height > 2048) throw java.io.IOException("the picture is bigger than 2048 x 2048")
+            val px = IntArray(bmp.width * bmp.height); bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+            val grid = p.animations().mapNotNull { a -> p.readText(a)?.let { AnimSet.parse(it) } }.firstOrNull { it.sheet == path }
+            val cols = grid?.cols ?: 1; val rows = grid?.rows ?: 1
+            val doc = SpriteDoc.fromSheet(px, bmp.width, bmp.height, cols, rows)
+            val usable = doc.frameCount == cols * rows
+            // jpg and webp are saved next to the original as a png, so the original is never overwritten with a different format
+            val target = if (path.lowercase().endsWith(".png")) path else path.substringBeforeLast('.') + ".png"
+            val s = SpriteSession(target, doc, if (usable) cols else 1, if (usable) rows else 1)
+            s.savedVersion = if (target == path) doc.version else -1
+            sprite = s; modal = Modal.Sprite
+        } catch (e: Exception) { error("Cannot open $path in the sprite editor: ${e.message}") }
+    }
+
+    /** Creates a blank png (one frame) in the assets folder and opens it in the sprite editor. */
+    fun newSprite(name: String, w: Int, h: Int) {
+        val p = project ?: return
+        val clean = name.trim().replace(Regex("[^A-Za-z0-9_-]"), "_").ifEmpty { return }
+        val path = "${under("assets")}/$clean.png"
+        if (p.file(path).exists()) { error("'$path' already exists"); return }
+        closeSprite()
+        try { sprite = SpriteSession(path, SpriteDoc.blank(w.coerceIn(1, 1024), h.coerceIn(1, 1024)), 1, 1); modal = Modal.Sprite; saveSprite() }
+        catch (e: Exception) { error("Cannot create the sprite: ${e.message}") }
+    }
+
+    /** Writes the picture as a png sheet (frames side by side) and keeps animation sets that use the sheet in step. */
+    fun saveSprite() {
+        val p = project ?: return; val s = sprite ?: return
+        if (!s.dirty) return
+        try {
+            val (cols, rows) = s.layout()
+            val (px, w, h) = s.doc.toSheet(cols)
+            val bmp = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
+            val f = p.file(s.path); f.parentFile?.mkdirs()
+            f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            s.cols = cols; s.rows = rows; s.savedVersion = s.doc.version
+            syncAnimations(s.path, cols, rows, s.doc.frameCount)
+            images?.clear(); rev++
+        } catch (e: Exception) { error("Cannot save ${s.path}: ${e.message}") }
+    }
+
+    private fun syncAnimations(sheet: String, cols: Int, rows: Int, frames: Int) {
+        val p = project ?: return
+        var used = false
+        for (a in p.animations()) {
+            val set = p.readText(a)?.let { AnimSet.parse(it) } ?: continue
+            if (set.sheet != sheet) continue
+            used = true
+            if (set.cols != cols || set.rows != rows) { set.cols = cols; set.rows = rows; p.file(a).writeText(set.toText()) }
+        }
+        if (!used && frames > 1) {                      // a new animated sprite gets an animation set with one clip that plays every frame
+            val base = AnimSet.cleanName(File(sheet).nameWithoutExtension).ifEmpty { "anim" }
+            var name = base; var i = 2
+            while (p.file("animations/$name.nanim").exists()) name = base + "_" + i++
+            val set = AnimSet(sheet, cols, rows, arrayListOf(Clip("all", 1, frames, 8.0, true)))
+            p.file("animations/$name.nanim").also { it.parentFile?.mkdirs() }.writeText(set.toText())
+            info("Made animations/$name.nanim for the new frames (clip 'all').")
+        }
+    }
+
+    fun closeSprite() {
+        saveSprite(); sprite = null
+        if (modal is Modal.Sprite) modal = null
     }
 
     fun openAnimation(path: String) {
@@ -220,9 +302,83 @@ class Studio(val ctx: Context) {
         } catch (e: Exception) { error("Import failed: ${e.message}") }
     }
 
+    // ---- opening a folder or a zip as a project: the files are copied into the projects folder, which is where the project is edited and saved from then on
+    var openFolderHook: (() -> Unit)? = null
+    var openZipHook: (() -> Unit)? = null
+    fun openFolder() { openFolderHook?.invoke() }
+    fun openZip() { openZipHook?.invoke() }
+    private var importing = false
+
+    private fun runImport(what: String, work: () -> Project) {
+        if (importing) { info("Still opening the last one..."); return }
+        importing = true; status = "Opening $what..."; info("Opening $what...")
+        Thread {
+            try {
+                val p = work()
+                post { importing = false; status = ""; openProject(p.dir); info("Saved to ${p.dir.absolutePath}; your changes are saved there automatically.") }
+            } catch (e: Exception) { post { importing = false; status = ""; error("Cannot open the $what: ${e.message ?: e.javaClass.simpleName}") } }
+        }.start()
+    }
+
+    private fun displayName(uri: Uri): String? {
+        var name: String? = null
+        try { ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) name = c.getString(0) } } catch (e: Exception) { }
+        return name
+    }
+
+    /** A zip the user picked becomes a project in the projects folder. */
+    fun openZipUri(uri: Uri) {
+        runImport("zip") {
+            val input = ctx.contentResolver.openInputStream(uri) ?: throw java.io.IOException("the file cannot be read")
+            input.use { ProjectImport.importZip(it, root, displayName(uri) ?: "Imported", ctx.cacheDir) }
+        }
+    }
+
+    /** A folder the user picked (system folder picker) becomes a project in the projects folder. */
+    fun openFolderUri(tree: Uri) {
+        runImport("folder") {
+            val rootId = DocumentsContract.getTreeDocumentId(tree)
+            val name = displayName(DocumentsContract.buildDocumentUriUsingTree(tree, rootId)) ?: "Imported"
+            val stage = File(ctx.cacheDir, "import-${System.nanoTime()}")
+            try {
+                copyDocumentTree(tree, rootId, stage, 0)
+                ProjectImport.adopt(stage, root, name, move = true)
+            } finally { stage.deleteRecursively() }
+        }
+    }
+
+    private fun copyDocumentTree(tree: Uri, docId: String, to: File, depth: Int) {
+        if (depth > 40) throw java.io.IOException("the folder is nested too deeply")
+        to.mkdirs()
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
+        val cols = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val entries = ArrayList<Triple<String, String, String>>()
+        ctx.contentResolver.query(children, cols, null, null, null)?.use { c -> while (c.moveToNext()) entries.add(Triple(c.getString(0), c.getString(1) ?: "", c.getString(2) ?: "")) }
+        for ((id, rawName, mime) in entries) {
+            val name = rawName.replace('/', '_')                         // a name from another app never gets to climb out of the folder
+            if (name.isEmpty() || name == "." || name == ".." || ProjectImport.isJunk(name)) continue
+            if (mime == DocumentsContract.Document.MIME_TYPE_DIR) copyDocumentTree(tree, id, File(to, name), depth + 1)
+            else ctx.contentResolver.openInputStream(DocumentsContract.buildDocumentUriUsingTree(tree, id))?.use { i -> File(to, name).outputStream().use { i.copyTo(it) } }
+        }
+    }
+
     private var libCounter = 0
     private val settingsFile = File(ctx.filesDir, "settings.properties")
     private val settings = Properties()
+
+    /** Autosave: every few seconds, scene and script edits are written to the project folder (no need to press save). */
+    private val autosave = object : Runnable {
+        override fun run() {
+            try {
+                if (sprite != null) { if (modal is Modal.Sprite) saveSprite() else closeSprite() }
+                val p = project
+                if (p != null && game == null) {
+                    saveScene()
+                    for (d in scripts) if (d.dirty) try { p.file(d.path).writeText(d.value.text); d.saved = d.value.text } catch (e: Exception) { error("Cannot save ${d.path}: ${e.message}") }
+                }
+            } finally { main.postDelayed(this, 4000) }
+        }
+    }
 
     init {
         if (settingsFile.exists()) settingsFile.inputStream().use { settings.load(it) }
@@ -230,6 +386,7 @@ class Studio(val ctx: Context) {
         showGrid = settings.getProperty("grid", "true") == "true"
         showFps = settings.getProperty("fps", "false") == "true"
         installApi()
+        main.postDelayed(autosave, 4000)
     }
 
     // ------------------------------------------------------------------ storage
@@ -282,7 +439,7 @@ class Studio(val ctx: Context) {
     }
 
     fun closeProject() {
-        stop(); saveAll()
+        stop(); saveAll(); closeSprite()
         preview?.release(); preview = null; animDoc = null
         project = null; editor = null; scenePath = null; scripts.clear(); activeScript = null; selectedPath = null; lowered = null; paintPath = null
         centerTab = CenterTab.Scene
@@ -449,6 +606,7 @@ class Studio(val ctx: Context) {
         val p = project ?: return
         val sources = p.scripts().map { path -> ScriptSource(path, scripts.firstOrNull { it.path == path }?.value?.text ?: p.readText(path) ?: "") }
         lowered = Transpiler.lower(sources); lintToken++
+        lowered?.let { nebula.core.Bars.register(it.metas) }      // the viewport shows DynamicBars from their script's `empty` / `full` lines
     }
 
     fun metaOf(path: String): ScriptMeta? = lowered?.metas?.firstOrNull { it.file == path }

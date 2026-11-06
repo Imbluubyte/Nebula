@@ -17,14 +17,19 @@ class MainActivity : ComponentActivity() {
 
     private val picker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) studio?.importUri(uri) }
 
+    private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> if (uri != null) studio?.openFolderUri(uri) }
+    private val zipPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) studio?.openZipUri(uri) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val s = Studio(this); studio = s
         s.importHook = { picker.launch("*/*") }
+        s.openFolderHook = { folderPicker.launch(null) }
+        s.openZipHook = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }
         setContent {
             NebulaTheme {
-                BackHandler(enabled = s.modal != null || s.game != null) { if (s.modal != null) s.modal = null else s.stop() }
+                BackHandler(enabled = s.modal != null || s.game != null) { if (s.modal is Modal.Sprite) s.closeSprite() else if (s.modal != null) s.modal = null else s.stop() }
                 androidx.compose.foundation.layout.Box(Modifier.onPreviewKeyEvent { Commands.handleKey(s, it) }) { StudioScreen(s) }
             }
         }
