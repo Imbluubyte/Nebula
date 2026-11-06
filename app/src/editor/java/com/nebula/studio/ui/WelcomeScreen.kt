@@ -32,6 +32,13 @@ fun WelcomeScreen(studio: Studio) {
                 Text("2D game engine for tablets. Scenes, nodes, SuperNova scripts.", color = C.dim, fontSize = 14.sp)
             }
             item { TextBtn("New project", { studio.modal = Modal.NewProject }, Modifier.fillMaxWidth(), primary = true) }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextBtn("Open folder", { studio.openFolder() }, Modifier.weight(1f))
+                    TextBtn("Open zip", { studio.openZip() }, Modifier.weight(1f))
+                }
+                Text("A folder or zip is copied into the projects folder, and your changes are saved there automatically.", color = C.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+            }
             item { Text("PROJECTS", color = C.dim, fontSize = 11.sp, letterSpacing = 1.sp) }
             if (projects.isEmpty()) item { Text("No projects yet. They are stored in ${studio.root.absolutePath}", color = C.dim, fontSize = 13.sp) }
             items(projects) { dir ->
