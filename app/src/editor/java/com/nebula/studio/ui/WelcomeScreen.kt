@@ -37,7 +37,8 @@ fun WelcomeScreen(studio: Studio) {
                     TextBtn("Open folder", { studio.openFolder() }, Modifier.weight(1f))
                     TextBtn("Open zip", { studio.openZip() }, Modifier.weight(1f))
                 }
-                Text("A folder or zip is copied into the projects folder, and your changes are saved there automatically.", color = C.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
+                TextBtn("Import from GitHub", { studio.modal = Modal.ImportGitHub }, Modifier.fillMaxWidth().padding(top = 8.dp))
+                Text("A folder, zip or public GitHub repository is copied into the projects folder, and your changes are saved there automatically.", color = C.dim, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
             item { Text("PROJECTS", color = C.dim, fontSize = 11.sp, letterSpacing = 1.sp) }
             if (projects.isEmpty()) item { Text("No projects yet. They are stored in ${studio.root.absolutePath}", color = C.dim, fontSize = 13.sp) }

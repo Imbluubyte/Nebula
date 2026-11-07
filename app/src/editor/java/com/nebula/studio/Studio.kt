@@ -93,6 +93,7 @@ class GameSession(val engine: Engine, val images: ImageCache, val sounds: Sounds
 
 sealed class Modal {
     object NewProject : Modal()
+    object ImportGitHub : Modal()
     object NewNode : Modal()
     object NewScene : Modal()
     object Palette : Modal()
@@ -176,7 +177,8 @@ class Studio(val ctx: Context) {
     /** Tapping an asset in the Files panel: sounds play, animation files open in the manager. */
     fun openAsset(path: String) {
         val l = path.lowercase()
-        if (l.endsWith(".wav") || l.endsWith(".ogg") || l.endsWith(".mp3")) previewSound(path)
+        if (nebula.core.Markdown.isMarkdown(l)) openScript(path)        // Markdown opens in the code editor
+        else if (l.endsWith(".wav") || l.endsWith(".ogg") || l.endsWith(".mp3")) previewSound(path)
         else if (listOf(".png", ".jpg", ".jpeg", ".webp").any { l.endsWith(it) }) openSprite(path)
     }
 
@@ -318,6 +320,11 @@ class Studio(val ctx: Context) {
                 post { importing = false; status = ""; openProject(p.dir); info("Saved to ${p.dir.absolutePath}; your changes are saved there automatically.") }
             } catch (e: Exception) { post { importing = false; status = ""; error("Cannot open the $what: ${e.message ?: e.javaClass.simpleName}") } }
         }.start()
+    }
+
+    /** A public GitHub repository (address typed by the user) is downloaded as a copy into the projects folder and opened. No sign-in is used. */
+    fun importGitHub(url: String) {
+        runImport("repository") { nebula.core.GitHubImport.import(url, root, ctx.cacheDir) }
     }
 
     private fun displayName(uri: Uri): String? {
@@ -532,7 +539,7 @@ class Studio(val ctx: Context) {
         val p = project ?: return
         var doc = scripts.firstOrNull { it.path == path }
         if (doc == null) {
-            val text = p.readText(path) ?: run { error("Script $path not found"); return }
+            val text = p.readText(path) ?: run { error("File $path not found"); return }
             doc = ScriptDoc(path, text); scripts.add(doc)
         }
         if (line > 0) {

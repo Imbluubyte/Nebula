@@ -36,6 +36,12 @@ class Project(val dir: File) {
     fun assets() = list("assets", "").filter { !it.endsWith("/") }
     fun animations() = list("animations", ".nanim")
 
+    /** Markdown notes anywhere in the project (README.md, docs/, assets/...), relative paths, sorted. The generated build folder and hidden folders are left out. */
+    fun docs(): List<String> =
+        dir.walkTopDown().onEnter { d -> d == dir || !(d.name.startsWith(".") || (d.parentFile == dir && d.name == "build")) }
+            .filter { it.isFile && Markdown.isMarkdown(it.name) }
+            .map { it.relativeTo(dir).path.replace('\\', '/') }.sorted().take(500).toList()
+
     /** Folders under [sub] (relative paths, empty ones included), sorted. */
     fun folders(sub: String): List<String> {
         val base = File(dir, sub)

@@ -111,6 +111,16 @@ fun FilesPanel(studio: Studio, modifier: Modifier = Modifier) {
             group("SCRIPTS", "scripts", p.scripts()) { studio.openScript(it) }
             group("ANIMATIONS", "animations", p.animations()) { studio.openAnimation(it) }
             group("ASSETS", "assets", p.assets()) { studio.openAsset(it) }
+            val docs = p.docs().filter { !it.startsWith("assets/") }          // Markdown inside assets/ already shows up under ASSETS
+            if (docs.isNotEmpty()) {
+                item { Text("DOCS", color = C.dim, fontSize = 11.sp, modifier = Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
+                items(docs) { path ->
+                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable { studio.openScript(path) }.padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(path, color = C.text, fontSize = 14.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                        IconBtn(Icons.Default.Delete, "Delete", { studio.modal = Modal.Confirm("Delete $path? This cannot be undone.") { studio.deleteFile(path) } }, size = 36.dp, tint = C.dim)
+                    }
+                }
+            }
         }
     }
 }

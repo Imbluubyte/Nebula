@@ -601,6 +601,69 @@ fun main(args: Array<String>) {
         check("a file is not a folder", runCatching { ProjectImport.importFolder(File(src, "scenes/main.nscn"), root) }.exceptionOrNull() is ProjectImport.ImportException)
     }
 
+    // --- Markdown files and importing a public GitHub repository
+    run {
+        check("markdown: file names", Markdown.isMarkdown("README.md") && Markdown.isMarkdown("docs/Guide.MD") && Markdown.isMarkdown("a.markdown") && !Markdown.isMarkdown("scripts/a.nbs") && !Markdown.isMarkdown("x.mdx"))
+        val md = "# Title\n\nSome **bold** and `code` and [a](b).\n- item\n```\n# not heading\n```\n> quote\n"
+        fun spanText(k: Markdown.Kind) = Markdown.spans(md).filter { it.kind == k }.map { md.substring(it.from, it.to) }
+        check("markdown: headings (not inside a code block)", spanText(Markdown.Kind.HEADING) == listOf("# Title"), spanText(Markdown.Kind.HEADING).toString())
+        check("markdown: bold, links", spanText(Markdown.Kind.BOLD) == listOf("**bold**") && spanText(Markdown.Kind.LINK) == listOf("[a](b)"))
+        check("markdown: inline and fenced code", spanText(Markdown.Kind.CODE) == listOf("`code`", "```", "# not heading", "```"), spanText(Markdown.Kind.CODE).toString())
+        check("markdown: list and quote markers", spanText(Markdown.Kind.MARKER) == listOf("-", ">"), spanText(Markdown.Kind.MARKER).toString())
+        check("markdown: empty text has no spans", Markdown.spans("").isEmpty())
+
+        val notes = File(tmp, "docs-project").also { it.deleteRecursively() }
+        for (f in listOf("README.md", "docs/guide.md", "assets/readme.md", "scripts/a.nbs", "build/out.md", ".github/x.md")) File(notes, f).also { it.parentFile.mkdirs() }.writeText("x")
+        check("project: docs() lists Markdown, not build or hidden folders", Project(notes).docs() == listOf("README.md", "assets/readme.md", "docs/guide.md"), Project(notes).docs().toString())
+
+        fun repoOf(s: String) = GitHubImport.parse(s)
+        fun same(s: String) = repoOf(s).let { it.owner == "Imbluubyte" && it.name == "Nebula" && it.refs.isEmpty() }
+        check("github: address forms", listOf("https://github.com/Imbluubyte/Nebula", "https://github.com/Imbluubyte/Nebula/", "http://www.github.com/Imbluubyte/Nebula.git", " github.com/Imbluubyte/Nebula ",
+            "git@github.com:Imbluubyte/Nebula.git", "Imbluubyte/Nebula", "https://github.com/Imbluubyte/Nebula?tab=readme-ov-file#readme", "https://github.com/Imbluubyte/Nebula/issues").all { same(it) })
+        check("github: branch address", repoOf("https://github.com/o/r/tree/feature/x/sub").refs == listOf("feature", "feature/x", "feature/x/sub"))
+        for (bad in listOf("", "   ", "nonsense", "https://gitlab.com/a/b", "https://github.com/onlyowner", "a/b c", "https://github.com/o/r/tree/../x", "-bad/repo"))
+            check("github: refuses '$bad'", runCatching { GitHubImport.parse(bad) }.exceptionOrNull() is ProjectImport.ImportException)
+        check("github: archive addresses", GitHubImport.archiveUrl(repoOf("o/r"), "HEAD") == "https://github.com/o/r/archive/HEAD.zip" &&
+            GitHubImport.archiveUrl(repoOf("o/r"), "feature/x y") == "https://github.com/o/r/archive/feature/x%20y.zip")
+
+        val base = File(tmp, "github").also { it.deleteRecursively(); it.mkdirs() }
+        val root = File(base, "NebulaProjects")
+        fun zipOf(entries: Map<String, String>): ByteArray {
+            val bo = java.io.ByteArrayOutputStream()
+            java.util.zip.ZipOutputStream(bo).use { z -> for ((n, t) in entries) { z.putNextEntry(java.util.zip.ZipEntry(n)); z.write(t.toByteArray()); z.closeEntry() } }
+            return bo.toByteArray()
+        }
+        // GitHub wraps everything in one folder called owner-repo-<commit>
+        val game = zipOf(mapOf("o-game-1a2b3c/project.nebula" to "title=Star Game\nscene=scenes/main.nscn\n", "o-game-1a2b3c/scenes/main.nscn" to "scene \"M\"\nnode R Node2D\n",
+            "o-game-1a2b3c/scripts/a.nbs" to "script A of Node2D:\n\tpass\n", "o-game-1a2b3c/README.md" to "# Star Game\n"))
+        val plain = zipOf(mapOf("o-plain-9f/README.md" to "# Plain\n", "o-plain-9f/docs/guide.md" to "guide", "o-plain-9f/src/x.txt" to "x"))
+        val asked = ArrayList<String>()
+        val fake: (String) -> java.io.InputStream? = { url ->
+            asked.add(url)
+            when (url) {
+                "https://github.com/o/game/archive/HEAD.zip", "https://github.com/o/game/archive/feature/x.zip" -> game.inputStream()
+                "https://github.com/o/plain/archive/HEAD.zip" -> plain.inputStream()
+                "https://github.com/o/offline/archive/HEAD.zip" -> throw java.net.UnknownHostException("github.com")
+                else -> null
+            }
+        }
+        val g1 = GitHubImport.import("https://github.com/o/game", root, File(base, "scratch"), fake)
+        check("github: a Nebula repository opens as a project inside the projects folder", g1.dir.parentFile == root && g1.title == "Star Game" && g1.readText("scripts/a.nbs") != null && g1.readText(g1.mainScene) != null, g1.dir.path)
+        check("github: Markdown from the repository comes along", g1.docs() == listOf("README.md"), g1.docs().toString())
+        check("github: scratch folder is cleaned up", File(base, "scratch").listFiles().orEmpty().isEmpty())
+        val g2 = GitHubImport.import("o/plain.git", root, File(base, "scratch"), fake)
+        check("github: any repository works, the wrapper folder is dropped and it is named after the repository", g2.dir.name == "plain" && g2.readText("README.md") == "# Plain\n" && g2.readText("src/x.txt") == "x" && !g2.file("o-plain-9f").exists(), g2.dir.path)
+        check("github: it gets the project folders and docs/ is listed", g2.file("scenes").isDirectory && g2.docs() == listOf("README.md", "docs/guide.md"))
+        asked.clear()
+        val g3 = GitHubImport.import("https://github.com/o/game/tree/feature/x", root, File(base, "scratch"), fake)
+        check("github: a branch address tries the branch names in order", asked == listOf("https://github.com/o/game/archive/feature.zip", "https://github.com/o/game/archive/feature/x.zip") && g3.dir.exists(), asked.toString())
+        val missing = runCatching { GitHubImport.import("https://github.com/o/private-one", root, File(base, "scratch"), fake) }.exceptionOrNull()
+        check("github: a missing or private repository says only public ones work", missing is ProjectImport.ImportException && missing.message!!.contains("public"), missing.toString())
+        val offline = runCatching { GitHubImport.import("o/offline", root, File(base, "scratch"), fake) }.exceptionOrNull()
+        check("github: no connection is explained", offline is ProjectImport.ImportException && offline.message!!.contains("internet"), offline.toString())
+        check("github: a bad address makes no request", run { asked.clear(); runCatching { GitHubImport.import("https://example.com/a/b", root, File(base, "scratch"), fake) }; asked.isEmpty() })
+    }
+
     // --- DynamicBar script API compiles with snc and the bar scene loads
     run {
         val bp = Project.create(File(tmp, "bars"), "Bars", preset = Preset.BLANK)

@@ -20,6 +20,13 @@ projects folder (the project is found even when a zip wraps everything in one fo
 `.git` data are left out, and the copy opens like any project. From then on you edit that copy and **every change is saved to it automatically** (every few seconds,
 when you leave the app, and when you run). Opening the same zip again makes another copy (`Name 2`); the original folder or zip is never touched.
 
+### Importing from GitHub
+
+**Import from GitHub** on the first screen asks for the address of a **public** repository (`https://github.com/owner/repo`, also `owner/repo`, a `.git` address,
+or a branch link like `https://github.com/owner/repo/tree/dev`, which imports that branch). Nebula downloads the repository and saves a copy in the projects folder, which then
+opens like any project; a repository that is not a Nebula project still opens, with the Nebula folders added. No GitHub sign-in is involved, so private repositories are
+not supported (GitHub answers "not found" for them). It needs an internet connection; exported games never use the internet.
+
 ### Starting a project
 
 **New project** asks you to pick a preset. Every preset is an ordinary project you can change freely.
@@ -37,6 +44,9 @@ Its numbers (`tweak speed`, `tweak jumpPower`) are also editable in the Inspecto
 
 * **Files tab**: folders for scenes, scripts, animations and assets. Use the folder buttons to create folders (and subfolders); tap a folder to
   make it the target for imports, new scenes, new scripts and new animation sets. Tap a sound to hear it.
+* **Markdown**: `.md` files (a repository's `README.md`, notes in `docs/`, or anything in `assets/`) are listed under **DOCS** and open in the same code editor as
+  scripts, with their own colours (headings, bold, code, links, lists) and a key row for Markdown characters. They are plain text files: nothing is rendered and
+  they are never built or exported into the game.
 * **Sprite editor**: tap an image in the Files tab, the brush icon (new sprite), or **Edit in sprite editor** under a Sprite's `image`. See "Drawing sprites" below.
 * **Left**: the scene tree (and a Files tab). A script appears as a row *under* its node. Tap to select, long-press to rename,
   the buttons above the tree add scripts, duplicate, move, indent/outdent and delete.

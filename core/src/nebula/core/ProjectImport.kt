@@ -50,7 +50,7 @@ object ProjectImport {
 
     /**
      * The project folder inside [dir]: the nearest folder (up to 3 levels down, so a zip that wraps everything in one folder works)
-     * that has a project.nebula, else the nearest one that has scenes/ or scripts/, else [dir] itself.
+     * that has a project.nebula, else the nearest one that has scenes/ or scripts/, else [dir] itself (or the one folder it only wraps).
      */
     fun findRoot(dir: File): File {
         fun search(match: (File) -> Boolean): File? {
@@ -61,7 +61,17 @@ object ProjectImport {
             }
             return null
         }
-        return search { File(it, "project.nebula").isFile } ?: search { File(it, "scenes").isDirectory || File(it, "scripts").isDirectory } ?: dir
+        return search { File(it, "project.nebula").isFile } ?: search { File(it, "scenes").isDirectory || File(it, "scripts").isDirectory } ?: unwrap(dir)
+    }
+
+    /** A folder that holds nothing but one folder (what GitHub's zip of a repository looks like) is that inner folder. */
+    private fun unwrap(dir: File): File {
+        var d = dir
+        repeat(4) {
+            val all = d.listFiles { f -> f.name !in skipNames }.orEmpty()
+            if (all.size == 1 && all[0].isDirectory) d = all[0] else return d
+        }
+        return d
     }
 
     private fun cleanName(raw: String): String = raw.trim().replace(Regex("[^A-Za-z0-9_ -]"), "").trim().ifEmpty { "Imported" }

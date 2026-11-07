@@ -38,6 +38,7 @@ fun ModalHost(studio: Studio) {
             .clip(RoundedCornerShape(16.dp)).background(C.panel).clickable(enabled = false) {}.padding(16.dp)) {
             when (m) {
                 Modal.NewProject -> NewProjectDialog(studio)
+                Modal.ImportGitHub -> ImportGitHubDialog(studio)
                 Modal.NewNode -> NewNodeDialog(studio)
                 Modal.NewAnimation -> TextPrompt(studio, "New animation set", "Name", "hero", "Create") { studio.newAnimation(it) }
                 Modal.Animation -> AnimationManager(studio)
@@ -77,6 +78,20 @@ private fun TextPrompt(studio: Studio, title: String, label: String, initial: St
         Field(initial, { text = it; if (it.isNotBlank()) { studio.modal = null; onOk(it) } }, label = label)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextBtn(action, { if (text.isNotBlank()) { studio.modal = null; onOk(text) } }, primary = true); TextBtn("Cancel", { studio.modal = null })
+        }
+    }
+}
+
+@Composable
+private fun ImportGitHubDialog(studio: Studio) {
+    var url by remember { mutableStateOf("") }
+    fun go(u: String) { if (u.isNotBlank()) { studio.modal = null; studio.importGitHub(u) } }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Import from GitHub", color = C.text, fontSize = 18.sp)
+        Field("", { url = it; go(it) }, label = "Repository address", placeholder = "https://github.com/owner/repo", mono = true)
+        Text("Public repositories only. A copy is saved in the projects folder, and your changes are saved there automatically. A link to a branch (.../tree/branch) imports that branch.", color = C.dim, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextBtn("Import", { go(url) }, primary = true); TextBtn("Cancel", { studio.modal = null })
         }
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
@@ -32,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nebula.studio.ScriptDoc
 import com.nebula.studio.Studio
+import nebula.core.Markdown
 
 private val kwSn = setOf("fn", "var", "const", "if", "orif", "else", "while", "for", "in", "return", "break", "continue", "match", "case", "default",
     "and", "or", "not", "has", "repeat", "try", "catch", "finally", "throw", "async", "await", "class", "extends", "enum", "use", "as", "private", "static",
@@ -70,7 +72,21 @@ fun highlight(text: String): AnnotatedString = buildAnnotatedString {
 
 private val highlighter = VisualTransformation { t -> TransformedText(highlight(t.text), OffsetMapping.Identity) }
 
-private fun autoIndent(old: TextFieldValue, nv: TextFieldValue): TextFieldValue {
+/** Markdown files open in this same editor; they get their own colours (the `#` of a heading is not a comment). */
+fun highlightMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    append(text)
+    for (sp in Markdown.spans(text)) addStyle(when (sp.kind) {
+        Markdown.Kind.HEADING -> SpanStyle(color = cNeb, fontWeight = FontWeight.Bold)
+        Markdown.Kind.CODE -> SpanStyle(color = cStr)
+        Markdown.Kind.BOLD -> SpanStyle(color = cNum, fontWeight = FontWeight.Bold)
+        Markdown.Kind.LINK -> SpanStyle(color = cPath)
+        Markdown.Kind.MARKER -> SpanStyle(color = cKw)
+    }, sp.from, sp.to)
+}
+
+private val mdHighlighter = VisualTransformation { t -> TransformedText(highlightMarkdown(t.text), OffsetMapping.Identity) }
+
+private fun autoIndent(old: TextFieldValue, nv: TextFieldValue, script: Boolean = true): TextFieldValue {
     if (nv.text.length != old.text.length + 1) return nv
     val pos = nv.selection.start
     if (pos < 1 || nv.text[pos - 1] != '\n' || nv.selection.length != 0) return nv
@@ -78,7 +94,7 @@ private fun autoIndent(old: TextFieldValue, nv: TextFieldValue): TextFieldValue 
     val prev = nv.text.substring(prevStart, pos - 1)
     var indent = prev.takeWhile { it == '\t' || it == ' ' }
     val code = prev.substringBefore('#').trimEnd()
-    if (code.endsWith(":")) indent += "\t"
+    if (script && code.endsWith(":")) indent += "\t"
     if (indent.isEmpty()) return nv
     return TextFieldValue(nv.text.substring(0, pos) + indent + nv.text.substring(pos), TextRange(pos + indent.length))
 }
@@ -119,7 +135,8 @@ private fun Editor(studio: Studio, doc: ScriptDoc, modifier: Modifier) {
     var layout by remember(doc.path) { mutableStateOf<TextLayoutResult?>(null) }
     val scroll = rememberScrollState()
     val text = doc.value.text
-    LaunchedEffect(text) { studio.lint() }
+    val md = Markdown.isMarkdown(doc.path)
+    LaunchedEffect(text) { if (!md) studio.lint() }          // only .nbs scripts are checked
     Box(modifier.fillMaxWidth().verticalScroll(scroll)) {
         Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 400.dp)) {
             // gutter: one number per logical line, placed with the real text layout so wrapped lines stay aligned
@@ -134,9 +151,9 @@ private fun Editor(studio: Studio, doc: ScriptDoc, modifier: Modifier) {
                 }
             }
             BasicTextField(
-                value = doc.value, onValueChange = { nv -> doc.change(autoIndent(doc.value, nv)) },
+                value = doc.value, onValueChange = { nv -> doc.change(autoIndent(doc.value, nv, script = !md)) },
                 textStyle = TextStyle(color = C.text, fontSize = 14.sp, fontFamily = Mono, lineHeight = 20.sp),
-                cursorBrush = SolidColor(C.accent2), visualTransformation = highlighter,
+                cursorBrush = SolidColor(C.accent2), visualTransformation = if (md) mdHighlighter else highlighter,
                 onTextLayout = { layout = it },
                 modifier = Modifier.weight(1f).padding(8.dp).onPreviewKeyEvent { e ->
                     if (e.type == KeyEventType.KeyDown && e.key == Key.Tab) { doc.insert("\t"); true } else false
@@ -150,8 +167,11 @@ private fun KeyRow(studio: Studio, doc: ScriptDoc) {
     Row(Modifier.fillMaxWidth().background(C.panel).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) {
         IconBtn(Icons.Default.Undo, "Undo", { doc.undo() }); IconBtn(Icons.Default.Redo, "Redo", { doc.redo() })
         IconBtn(Icons.Default.Save, "Save", { studio.saveAll() }, tint = if (doc.dirty) C.accent2 else C.dim)
-        for ((label, ins) in listOf("Tab" to "\t", "@" to "@", ":" to ":", "(" to "(", ")" to ")", "[" to "[", "]" to "]", "\"" to "\"", "=" to " = ", "->" to " -> ",
-            "." to ".", "," to ", ", "#" to "# ", "{" to "{", "}" to "}", "<" to "<", ">" to ">", "_" to "_", "/" to "/", "^" to "^")) {
+        val keys = if (Markdown.isMarkdown(doc.path)) listOf("Tab" to "\t", "#" to "#", "*" to "*", "-" to "- ", "`" to "`", "[" to "[", "]" to "]", "(" to "(", ")" to ")",
+            ">" to "> ", "!" to "!", "_" to "_", "|" to "|", "1." to "1. ", "```" to "```\n", "." to ".", "," to ", ", ":" to ":", "/" to "/")
+        else listOf("Tab" to "\t", "@" to "@", ":" to ":", "(" to "(", ")" to ")", "[" to "[", "]" to "]", "\"" to "\"", "=" to " = ", "->" to " -> ",
+            "." to ".", "," to ", ", "#" to "# ", "{" to "{", "}" to "}", "<" to "<", ">" to ">", "_" to "_", "/" to "/", "^" to "^")
+        for ((label, ins) in keys) {
             Box(Modifier.height(44.dp).defaultMinSize(minWidth = 40.dp).clickable { doc.insert(ins) }.padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
                 Text(label, color = C.text, fontSize = 16.sp, fontFamily = Mono)
             }
