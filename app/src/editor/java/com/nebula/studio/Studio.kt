@@ -23,6 +23,7 @@ import com.nebula.studio.build.ExportOptions
 import com.nebula.studio.build.Installer
 import com.nebula.studio.build.TermuxRunner
 import com.nebula.studio.runtime.*
+import com.nebula.studio.ui.VectorRender
 import nebula.core.*
 import nebula.lang.*
 import java.io.File
@@ -156,6 +157,8 @@ class Studio(val ctx: Context) {
     val console = mutableStateListOf<LogLine>()
     var building by mutableStateOf(false)
     var status by mutableStateOf("")
+    var importBusy by mutableStateOf(false)            // a folder / zip / GitHub import is running
+    var importError by mutableStateOf<String?>(null)   // why the last import failed (the GitHub dialog shows it)
     var game by mutableStateOf<GameSession?>(null)
     var images by mutableStateOf<ImageCache?>(null)
 
@@ -179,6 +182,7 @@ class Studio(val ctx: Context) {
         val l = path.lowercase()
         if (nebula.core.Markdown.isMarkdown(l)) openScript(path)        // Markdown opens in the code editor
         else if (l.endsWith(".wav") || l.endsWith(".ogg") || l.endsWith(".mp3")) previewSound(path)
+        else if (l.endsWith(".nvec")) openSprite(path.substringBeforeLast('.') + ".png")         // the shapes of a vector sprite open in the sprite editor
         else if (listOf(".png", ".jpg", ".jpeg", ".webp").any { l.endsWith(it) }) openSprite(path)
     }
 
@@ -190,6 +194,18 @@ class Studio(val ctx: Context) {
         val p = project ?: return
         closeSprite()
         try {
+            // a vector sprite keeps its shapes in a .nvec next to the PNG (the PNG is only what the game draws), so that opens it again as shapes
+            val nvec = VectorFile.extensionOf(path)
+            val vd = if (path.lowercase().endsWith(".png")) p.readText(nvec)?.let { VectorFile.parse(it) } else null
+            if (vd != null) {
+                val grid = p.animations().mapNotNull { a -> p.readText(a)?.let { AnimSet.parse(it) } }.firstOrNull { it.sheet == path }
+                val cols = grid?.cols ?: 1; val rows = grid?.rows ?: 1
+                val usable = vd.frameCount == cols * rows
+                val vs = SpriteSession(path, vd, if (usable) cols else 1, if (usable) rows else 1)
+                vs.savedVersion = if (p.file(path).isFile) vd.version else -1          // a missing PNG is made on the first save
+                sprite = vs; modal = Modal.Sprite
+                return
+            }
             val bytes = p.file(path).takeIf { it.isFile }?.readBytes() ?: throw java.io.IOException("file not found")
             val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: throw java.io.IOException("not a picture Android can read")
             if (bmp.width > 2048 || bmp.height > 2048) throw java.io.IOException("the picture is bigger than 2048 x 2048")
@@ -206,14 +222,17 @@ class Studio(val ctx: Context) {
         } catch (e: Exception) { error("Cannot open $path in the sprite editor: ${e.message}") }
     }
 
-    /** Creates a blank png (one frame) in the assets folder and opens it in the sprite editor. */
-    fun newSprite(name: String, w: Int, h: Int) {
+    /** Creates a blank png (one frame) in the assets folder and opens it in the sprite editor, as pixel art or as a vector sprite. */
+    fun newSprite(name: String, w: Int, h: Int, vector: Boolean = false) {
         val p = project ?: return
         val clean = name.trim().replace(Regex("[^A-Za-z0-9_-]"), "_").ifEmpty { return }
         val path = "${under("assets")}/$clean.png"
         if (p.file(path).exists()) { error("'$path' already exists"); return }
         closeSprite()
-        try { sprite = SpriteSession(path, SpriteDoc.blank(w.coerceIn(1, 1024), h.coerceIn(1, 1024)), 1, 1); modal = Modal.Sprite; saveSprite() }
+        try {
+            val ww = w.coerceIn(1, 1024); val hh = h.coerceIn(1, 1024)
+            sprite = SpriteSession(path, if (vector) VectorDoc.blank(ww, hh) else SpriteDoc.blank(ww, hh), 1, 1); modal = Modal.Sprite; saveSprite()
+        }
         catch (e: Exception) { error("Cannot create the sprite: ${e.message}") }
     }
 
@@ -223,10 +242,14 @@ class Studio(val ctx: Context) {
         if (!s.dirty) return
         try {
             val (cols, rows) = s.layout()
-            val (px, w, h) = s.doc.toSheet(cols)
+            // a vector sprite is drawn into pixels for the PNG; its shapes are kept in the .nvec next to it
+            val vd = s.vector
+            val flat = vd?.let { v -> SpriteDoc(v.width, v.height, v.frames.map { VectorRender.rasterize(it, v.width, v.height) }) } ?: (s.doc as SpriteDoc)
+            val (px, w, h) = flat.toSheet(cols)
             val bmp = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888)
             val f = p.file(s.path); f.parentFile?.mkdirs()
             f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            if (vd != null) p.file(VectorFile.extensionOf(s.path)).writeText(VectorFile.toText(vd))
             s.cols = cols; s.rows = rows; s.savedVersion = s.doc.version
             syncAnimations(s.path, cols, rows, s.doc.frameCount)
             images?.clear(); rev++
@@ -313,18 +336,18 @@ class Studio(val ctx: Context) {
 
     private fun runImport(what: String, work: () -> Project) {
         if (importing) { info("Still opening the last one..."); return }
-        importing = true; status = "Opening $what..."; info("Opening $what...")
+        importing = true; importBusy = true; importError = null; status = "Opening $what..."; info("Opening $what...")
         Thread {
             try {
                 val p = work()
-                post { importing = false; status = ""; openProject(p.dir); info("Saved to ${p.dir.absolutePath}; your changes are saved there automatically.") }
-            } catch (e: Exception) { post { importing = false; status = ""; error("Cannot open the $what: ${e.message ?: e.javaClass.simpleName}") } }
+                post { importing = false; importBusy = false; status = ""; if (modal is Modal.ImportGitHub) modal = null; openProject(p.dir); info("Saved to ${p.dir.absolutePath}; your changes are saved there automatically.") }
+            } catch (e: Exception) { post { importing = false; importBusy = false; status = ""; importError = e.message ?: e.javaClass.simpleName; error("Cannot open the $what: ${e.message ?: e.javaClass.simpleName}") } }
         }.start()
     }
 
     /** A public GitHub repository (address typed by the user) is downloaded as a copy into the projects folder and opened. No sign-in is used. */
-    fun importGitHub(url: String) {
-        runImport("repository") { nebula.core.GitHubImport.import(url, root, ctx.cacheDir) }
+    fun importGitHub(url: String, title: String = "", packageId: String = "") {
+        runImport("repository") { nebula.core.GitHubImport.import(url, root, ctx.cacheDir, title = title, packageId = packageId) }
     }
 
     private fun displayName(uri: Uri): String? {

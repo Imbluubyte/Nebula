@@ -62,16 +62,20 @@ object GitHubImport {
         return c.inputStream
     }
 
-    /** Downloads the repository described by [input] and opens it as a project inside [root]. The project is named after the repository unless it has its own title. */
-    fun import(input: String, root: File, scratch: File, open: (String) -> InputStream? = ::httpOpen): Project {
+    /**
+     * Downloads the repository described by [input] and opens it as a project inside [root]. The project is named after the repository
+     * unless it has its own title; [title] and [packageId] (when not blank) are the user's choice and win over both.
+     */
+    fun import(input: String, root: File, scratch: File, open: (String) -> InputStream? = ::httpOpen, title: String? = null, packageId: String? = null): Project {
         val repo = parse(input)
+        if (!packageId.isNullOrBlank() && !ProjectImport.isPackageId(packageId.trim())) throw ProjectImport.ImportException("the package id must look like com.example.mygame (lowercase letters, digits and underscores, with at least one dot)")
         val candidates = if (repo.refs.isEmpty()) listOf("HEAD") else repo.refs
         for (ref in candidates) {
             val stream = try { open(archiveUrl(repo, ref)) }
             catch (e: java.net.UnknownHostException) { throw ProjectImport.ImportException("cannot reach GitHub, check the internet connection") }
             catch (e: java.net.SocketTimeoutException) { throw ProjectImport.ImportException("GitHub took too long to answer, try again") }
             catch (e: java.net.ConnectException) { throw ProjectImport.ImportException("cannot reach GitHub, check the internet connection") }
-            if (stream != null) return stream.use { ProjectImport.importZip(it, root, repo.name, scratch) }
+            if (stream != null) return stream.use { ProjectImport.importZip(it, root, repo.name, scratch, title, packageId) }
         }
         throw ProjectImport.ImportException(
             if (repo.refs.isEmpty()) "'${repo.owner}/${repo.name}' was not found. Only public repositories can be imported, so check the spelling and that it is not private."

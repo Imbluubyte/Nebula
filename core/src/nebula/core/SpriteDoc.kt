@@ -7,55 +7,55 @@ package nebula.core
  * Frames are never changed in place: a stroke draws into a copy that replaces the frame when the stroke ends, so an undo step is just a
  * list of references to the frames as they were (cheap even with many frames).
  */
-class SpriteDoc(val width: Int, val height: Int, frames: List<IntArray>) {
+class SpriteDoc(override val width: Int, override val height: Int, frames: List<IntArray>) : FrameDoc {
     init { require(width in 1..2048 && height in 1..2048) { "the picture must be 1 to 2048 pixels wide and high" } ; require(frames.isNotEmpty() && frames.all { it.size == width * height }) { "frames do not fit the picture" } }
 
     var frames: List<IntArray> = frames.map { it.copyOf() }
         private set
-    var current = 0
+    override var current = 0
         private set
     /** Bumped on every change, so the UI knows when to redraw. */
-    var version = 0
+    override var version = 0
         private set
 
     val frame: IntArray get() = frames[current]
-    val frameCount get() = frames.size
+    override val frameCount get() = frames.size
 
     // ------------------------------------------------------------------ undo / redo
     private class Snapshot(val frames: List<IntArray>, val current: Int)
     private val undoStack = ArrayList<Snapshot>()
     private val redoStack = ArrayList<Snapshot>()
-    val canUndo get() = undoStack.isNotEmpty()
-    val canRedo get() = redoStack.isNotEmpty()
+    override val canUndo get() = undoStack.isNotEmpty()
+    override val canRedo get() = redoStack.isNotEmpty()
 
     private fun checkpoint() {
         undoStack.add(Snapshot(frames, current)); if (undoStack.size > MAX_UNDO) undoStack.removeAt(0)
         redoStack.clear()
     }
-    fun undo() { val s = undoStack.removeLastOrNull() ?: return; redoStack.add(Snapshot(frames, current)); frames = s.frames; current = s.current; version++ }
-    fun redo() { val s = redoStack.removeLastOrNull() ?: return; undoStack.add(Snapshot(frames, current)); frames = s.frames; current = s.current; version++ }
+    override fun undo() { val s = undoStack.removeLastOrNull() ?: return; redoStack.add(Snapshot(frames, current)); frames = s.frames; current = s.current; version++ }
+    override fun redo() { val s = redoStack.removeLastOrNull() ?: return; undoStack.add(Snapshot(frames, current)); frames = s.frames; current = s.current; version++ }
 
     private fun replaceCurrent(px: IntArray) { frames = frames.toMutableList().also { it[current] = px }; version++ }
 
     // ------------------------------------------------------------------ frames
-    fun select(i: Int) { val n = i.coerceIn(0, frames.size - 1); if (n != current) { current = n; version++ } }
+    override fun select(i: Int) { val n = i.coerceIn(0, frames.size - 1); if (n != current) { current = n; version++ } }
 
     /** Adds a frame after the current one (a copy of it, or blank) and selects it. */
-    fun addFrame(copy: Boolean) {
+    override fun addFrame(copy: Boolean) {
         checkpoint()
         val f = if (copy) frame.copyOf() else IntArray(width * height)
         frames = frames.toMutableList().also { it.add(current + 1, f) }; current++; version++
     }
-    fun deleteFrame() {
+    override fun deleteFrame() {
         if (frames.size <= 1) return
         checkpoint(); frames = frames.toMutableList().also { it.removeAt(current) }; current = current.coerceAtMost(frames.size - 1); version++
     }
     /** Moves the current frame one place earlier (-1) or later (+1). */
-    fun moveFrame(delta: Int) {
+    override fun moveFrame(delta: Int) {
         val to = current + delta; if (to !in frames.indices) return
         checkpoint(); frames = frames.toMutableList().also { val f = it.removeAt(current); it.add(to, f) }; current = to; version++
     }
-    fun clearFrame() { checkpoint(); replaceCurrent(IntArray(width * height)) }
+    override fun clearFrame() { checkpoint(); replaceCurrent(IntArray(width * height)) }
 
     // ------------------------------------------------------------------ tools
     /** How a brush paints. [pixel] = hard edged (pixel art), otherwise soft anti-aliased. [erase] removes paint instead of adding it. */
@@ -188,20 +188,7 @@ class SpriteDoc(val width: Int, val height: Int, frames: List<IntArray>) {
      * Frames to show faintly while drawing: [before] earlier and [after] later ones, fading with distance. With [wrap] the animation
      * counts as a loop (the frame before the first is the last), which is how a looping animation is drawn.
      */
-    fun onion(before: Int, after: Int, wrap: Boolean): List<Onion> {
-        val n = frames.size; val out = ArrayList<Onion>()
-        if (n <= 1) return out
-        val seen = HashSet<Int>().also { it.add(current) }
-        fun add(off: Int) {
-            var i = current + off
-            if (wrap) i = ((i % n) + n) % n else if (i !in 0 until n) return
-            if (!seen.add(i)) return
-            out.add(Onion(i, off, 0.5f / Math.abs(off)))
-        }
-        for (k in 1..before.coerceIn(0, 8)) add(-k)
-        for (k in 1..after.coerceIn(0, 8)) add(k)
-        return out
-    }
+    override fun onion(before: Int, after: Int, wrap: Boolean): List<Onion> = onionFrames(frames.size, current, before, after, wrap)
 
     // ------------------------------------------------------------------ sprite sheets
     /** The frames laid out as a sheet [cols] frames wide: pixels, width, height. */

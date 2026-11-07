@@ -13,7 +13,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -44,6 +44,7 @@ import com.nebula.studio.SpriteTool
 import com.nebula.studio.Studio
 import kotlinx.coroutines.delay
 import nebula.core.Argb
+import nebula.core.VShape
 
 private fun bitmapOf(px: IntArray, w: Int, h: Int): ImageBitmap = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
 
@@ -61,7 +62,7 @@ fun SpriteEditor(studio: Studio) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Column(Modifier.weight(1f)) {
                 Text(s.path.substringAfterLast('/'), color = C.text, fontSize = 18.sp, maxLines = 1)
-                Text("${doc.width} x ${doc.height} px, ${doc.frameCount} frame" + (if (doc.frameCount == 1) "" else "s") + if (s.dirty) "  (saving...)" else "  saved", color = C.dim, fontSize = 11.sp)
+                Text("${doc.width} x ${doc.height} px, ${if (s.isVector) "vector, " else ""}${doc.frameCount} frame" + (if (doc.frameCount == 1) "" else "s") + if (s.dirty) "  (saving...)" else "  saved", color = C.dim, fontSize = 11.sp)
             }
             TextBtn("Undo", { s.undo() }, enabled = doc.canUndo)
             TextBtn("Redo", { s.redo() }, enabled = doc.canRedo)
@@ -94,14 +95,22 @@ private fun SpriteCanvas(s: SpriteSession, modifier: Modifier) {
     val tick = s.tick
     val w = doc.width; val h = doc.height
     // the picture as drawn now (re-made on every change, also while a stroke is in progress)
-    val image = remember(tick) { bitmapOf(s.live, w, h) }
+    val px = s.pixels; val vd = s.vector
+    val image = remember(tick) { if (px != null) bitmapOf(s.live, w, h) else null }
     // onion skin frames: made again only when a frame is committed or the onion settings change
     val ghosts = remember(doc.version, s.onion, s.onionBefore, s.onionAfter, s.onionLoop) {
-        if (!s.onion) emptyList() else doc.onion(s.onionBefore, s.onionAfter, s.onionLoop).map { o ->
+        if (!s.onion || px == null) emptyList() else px.onion(s.onionBefore, s.onionAfter, s.onionLoop).map { o ->
             val tint = if (o.offset < 0) 0xFFFF4D4D.toInt() else 0xFF4DFF4D.toInt()
-            bitmapOf(Argb.ghost(doc.frames[o.index], tint, (o.alpha * 1.6f).coerceAtMost(0.75f)), w, h)
+            bitmapOf(Argb.ghost(px.frames[o.index], tint, (o.alpha * 1.6f).coerceAtMost(0.75f)), w, h)
         }
     }
+    // the same for a vector sprite: the shapes of the neighbouring frames, with the tint and fade to draw them in
+    val vGhosts: List<Triple<List<VShape>, Int, Float>> = remember(doc.version, s.onion, s.onionBefore, s.onionAfter, s.onionLoop) {
+        if (!s.onion || vd == null) emptyList() else vd.onion(s.onionBefore, s.onionAfter, s.onionLoop).map { o ->
+            Triple(vd.frames[o.index], if (o.offset < 0) 0xFFFF4D4D.toInt() else 0xFF4DFF4D.toInt(), (o.alpha * 1.6f).coerceAtMost(0.75f))
+        }
+    }
+    val shapes = vd?.frame
     Canvas(modifier.clip(RoundedCornerShape(8.dp)).background(C.bg)
         .onSizeChanged { s.viewW = it.width.toFloat(); s.viewH = it.height.toFloat(); if (s.zoom == 0f) s.refit() }
         .pointerInput(s) {                                   // mouse wheel zoom
@@ -120,8 +129,7 @@ private fun SpriteCanvas(s: SpriteSession, modifier: Modifier) {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 if (s.zoom == 0f) return@awaitEachGesture
                 var multi = false
-                val (sx, sy) = s.pixelAt(down.position)
-                s.begin(sx, sy)
+                s.begin(down.position)
                 do {
                     val ev = awaitPointerEvent()
                     val pressed = ev.changes.filter { it.pressed }
@@ -131,7 +139,7 @@ private fun SpriteCanvas(s: SpriteSession, modifier: Modifier) {
                         ev.changes.forEach { it.consume() }
                     } else if (!multi) {
                         val c = ev.changes.firstOrNull { it.id == down.id }
-                        if (c != null && c.pressed) { val (x, y) = s.pixelAt(c.position); s.move(x, y); c.consume() }
+                        if (c != null && c.pressed) { s.move(c.position); c.consume() }
                     }
                 } while (ev.changes.any { it.pressed })
                 if (!multi) s.end()
@@ -156,11 +164,17 @@ private fun SpriteCanvas(s: SpriteSession, modifier: Modifier) {
             }
             translate(ox, oy) {
                 scale(z, z, Offset.Zero) {
-                    for (g in ghosts) drawImage(g, filterQuality = FilterQuality.None)          // earlier frames red, later frames green
-                    drawImage(image, filterQuality = FilterQuality.None)
+                    if (image != null) {
+                        for (g in ghosts) drawImage(g, filterQuality = FilterQuality.None)      // earlier frames red, later frames green
+                        drawImage(image, filterQuality = FilterQuality.None)
+                    } else if (shapes != null) {
+                        for ((gs, tint, fade) in vGhosts) drawShapes(gs, tint = tint, alpha = fade)
+                        drawShapes(shapes, dim = s.erasing)
+                        s.draft?.let { drawShapes(listOf(it)) }                                  // the shape being drawn
+                    }
                 }
             }
-            if (s.grid && z >= 6f) {
+            if (px != null && s.grid && z >= 6f) {
                 val gc = Color(0x33FFFFFF)
                 for (i in Math.max(0, Math.floor(((x0 - ox) / z).toDouble()).toInt())..Math.min(w, Math.ceil(((x1 - ox) / z).toDouble()).toInt())) drawLine(gc, Offset(ox + i * z, y0), Offset(ox + i * z, y1), 1f)
                 for (i in Math.max(0, Math.floor(((y0 - oy) / z).toDouble()).toInt())..Math.min(h, Math.ceil(((y1 - oy) / z).toDouble()).toInt())) drawLine(gc, Offset(x0, oy + i * z), Offset(x1, oy + i * z), 1f)
@@ -178,8 +192,9 @@ private fun ToolsPanel(s: SpriteSession) {
         for (t in row) TextBtn(t.label, { s.tool = t }, Modifier.weight(1f), primary = s.tool == t)
         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
     }
+    if (s.isVector) Text("Vector sprite: the eraser removes whole shapes, Fill colours the closed shape you tap, the eyedropper picks a shape's colour.", color = C.dim, fontSize = 11.sp)
     Column {
-        Text("Brush size: ${s.size} px", color = C.dim, fontSize = 12.sp)
+        Text(if (s.isVector) "Line width: ${s.size} px" else "Brush size: ${s.size} px", color = C.dim, fontSize = 12.sp)
         Slider(value = s.size.toFloat(), onValueChange = { s.size = Math.round(it).coerceIn(1, 64) }, valueRange = 1f..64f)
     }
     Column {
@@ -187,7 +202,7 @@ private fun ToolsPanel(s: SpriteSession) {
         Slider(value = s.opacity, onValueChange = { s.opacity = it.coerceIn(0.05f, 1f) }, valueRange = 0.05f..1f)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        TextBtn(if (s.pixel) "Pixel brush" else "Soft brush", { s.pixel = !s.pixel }, Modifier.weight(1f))
+        if (!s.isVector) TextBtn(if (s.pixel) "Pixel brush" else "Soft brush", { s.pixel = !s.pixel }, Modifier.weight(1f))
         if (s.tool == SpriteTool.Rect || s.tool == SpriteTool.Ellipse) TextBtn(if (s.filled) "Filled" else "Outline", { s.filled = !s.filled }, Modifier.weight(1f))
     }
 
@@ -207,7 +222,7 @@ private fun ToolsPanel(s: SpriteSession) {
     }
     Swatches("Palette", SpriteColors.palette, s)
     if (s.recent.isNotEmpty()) Swatches("Recent", s.recent.toList(), s)
-    TextBtn(if (s.grid) "Pixel grid: on" else "Pixel grid: off", { s.grid = !s.grid }, Modifier.fillMaxWidth())
+    if (!s.isVector) TextBtn(if (s.grid) "Pixel grid: on" else "Pixel grid: off", { s.grid = !s.grid }, Modifier.fillMaxWidth())
     TextBtn("Fit picture to view", { s.refit() }, Modifier.fillMaxWidth())
     Text("One finger draws, two fingers move and zoom.", color = C.dim, fontSize = 11.sp)
 }
@@ -229,6 +244,13 @@ private fun Swatches(title: String, colors: List<Int>, s: SpriteSession) {
 private fun FramesPanel(s: SpriteSession) {
     s.tick
     val doc = s.doc
+    // The frame lists are read here, in the composition, and every change replaces them, so the strip is rebuilt as soon as a frame is
+    // added, deleted, moved or drawn on (reading them inside the LazyRow would leave the strip stale until the editor was reopened).
+    val pixelFrames: List<IntArray>? = s.pixels?.frames
+    val vectorFrames: List<List<VShape>>? = s.vector?.frames
+    val count = doc.frameCount; val cur = doc.current
+    val listState = rememberLazyListState()
+    LaunchedEffect(count, cur) { if (cur in 0 until count) listState.animateScrollToItem(cur) }
     var playIndex by remember { mutableIntStateOf(0) }
     LaunchedEffect(s.playing, s.fps, doc.frameCount) {
         playIndex = 0
@@ -236,27 +258,20 @@ private fun FramesPanel(s: SpriteSession) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            LazyRow(Modifier.weight(1f).height(60.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                itemsIndexed(doc.frames) { i, f ->
-                    val bmp = remember(f) { bitmapOf(f, doc.width, doc.height) }
+            LazyRow(Modifier.weight(1f).height(60.dp), state = listState, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(count) { i ->
                     Box(Modifier.size(56.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2A2D4F))
-                        .border(if (i == doc.current) 2.dp else 1.dp, if (i == doc.current) C.accent2 else C.dim.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                        .border(if (i == cur) 2.dp else 1.dp, if (i == cur) C.accent2 else C.dim.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
                         .clickable { s.edit { it.select(i) } }) {
-                        Canvas(Modifier.fillMaxSize().padding(3.dp)) {
-                            val sc = Math.min(size.width / doc.width, size.height / doc.height)
-                            translate((size.width - doc.width * sc) / 2f, (size.height - doc.height * sc) / 2f) { scale(sc, sc, Offset.Zero) { drawImage(bmp, filterQuality = FilterQuality.None) } }
-                        }
+                        FrameThumb(s, pixelFrames?.getOrNull(i), vectorFrames?.getOrNull(i), Modifier.fillMaxSize().padding(3.dp))
                         Text("${i + 1}", color = C.text, fontSize = 10.sp, modifier = Modifier.align(Alignment.TopStart).padding(start = 4.dp, top = 1.dp))
                     }
                 }
             }
             if (s.playing && doc.frameCount > 1) {
-                val frame = doc.frames[playIndex.coerceIn(0, doc.frameCount - 1)]
-                val bmp = remember(frame) { bitmapOf(frame, doc.width, doc.height) }
-                Canvas(Modifier.size(60.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2A2D4F)).border(1.dp, C.ok, RoundedCornerShape(6.dp))) {
-                    val sc = Math.min(size.width / doc.width, size.height / doc.height)
-                    translate((size.width - doc.width * sc) / 2f, (size.height - doc.height * sc) / 2f) { scale(sc, sc, Offset.Zero) { drawImage(bmp, filterQuality = FilterQuality.None) } }
-                }
+                val idx = playIndex.coerceIn(0, doc.frameCount - 1)
+                FrameThumb(s, pixelFrames?.getOrNull(idx), vectorFrames?.getOrNull(idx),
+                    Modifier.size(60.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF2A2D4F)).border(1.dp, C.ok, RoundedCornerShape(6.dp)))
             }
         }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -280,27 +295,52 @@ private fun FramesPanel(s: SpriteSession) {
     }
 }
 
+/** One frame, small: the pixels of a pixel sprite or the shapes of a vector sprite, fitted into [modifier]'s box. */
+@Composable
+private fun FrameThumb(s: SpriteSession, pixels: IntArray?, shapes: List<VShape>?, modifier: Modifier) {
+    val doc = s.doc
+    val bmp = remember(pixels) { if (pixels != null) bitmapOf(pixels, doc.width, doc.height) else null }
+    Canvas(modifier) {
+        val sc = Math.min(size.width / doc.width, size.height / doc.height)
+        translate((size.width - doc.width * sc) / 2f, (size.height - doc.height * sc) / 2f) {
+            scale(sc, sc, Offset.Zero) {
+                if (bmp != null) drawImage(bmp, filterQuality = FilterQuality.None) else if (shapes != null) drawShapes(shapes)
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------- new sprite
-/** Size first (buttons or the two number fields), then the name: pressing Done on the keyboard creates it. */
+/** Pixel art or vector first (a sprite is one or the other), then size and name: Create, or Done on the keyboard, makes it. */
 @Composable
 fun NewSpriteDialog(studio: Studio) {
+    var vector by remember { mutableStateOf(false) }
     var w by remember { mutableStateOf("32") }
     var h by remember { mutableStateOf("32") }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var name by remember { mutableStateOf("sprite") }
+    fun create() {
+        if (name.isBlank()) return
+        val ww = w.toDoubleOrNull()?.toInt() ?: 32; val hh = h.toDoubleOrNull()?.toInt() ?: 32
+        studio.modal = null; studio.newSprite(name, ww, hh, vector)
+    }
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("New sprite", color = C.text, fontSize = 18.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (n in listOf(16, 32, 64, 128)) TextBtn("$n x $n", { w = n.toString(); h = n.toString() }, Modifier.weight(1f))
+            TextBtn("Pixel art", { if (vector) { vector = false; w = "32"; h = "32" } }, Modifier.weight(1f), primary = !vector)
+            TextBtn("Vector", { if (!vector) { vector = true; w = "128"; h = "128" } }, Modifier.weight(1f), primary = vector)
+        }
+        Text(if (vector) "Shapes you can move on to edit again later. Saved as a PNG for the game plus a .nvec file for the editor. A sprite is either vector or pixel art, it cannot be both."
+              else "Pixels you paint one by one. A sprite is either pixel art or vector, it cannot be both.", color = C.dim, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (n in if (vector) listOf(64, 128, 256, 512) else listOf(16, 32, 64, 128)) TextBtn("$n x $n", { w = n.toString(); h = n.toString() }, Modifier.weight(1f))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Field(w, { w = it }, Modifier.weight(1f), label = "Width (px)", number = true)
-            Field(h, { h = it }, Modifier.weight(1f), label = "Height (px)", number = true)
+            Field(w, { w = it }, Modifier.weight(1f), label = "Width (px)", number = true, onChange = { w = it })
+            Field(h, { h = it }, Modifier.weight(1f), label = "Height (px)", number = true, onChange = { h = it })
         }
-        Field("sprite", { name ->
-            if (name.isNotBlank()) {
-                val ww = w.toDoubleOrNull()?.toInt() ?: 32; val hh = h.toDoubleOrNull()?.toInt() ?: 32
-                studio.modal = null; studio.newSprite(name, ww, hh)
-            }
-        }, label = "Name (press Done on the keyboard to create)")
-        TextBtn("Cancel", { studio.modal = null })
+        Field(name, { name = it; create() }, label = "Name", onChange = { name = it })
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextBtn("Create", { create() }, primary = true); TextBtn("Cancel", { studio.modal = null })
+        }
     }
 }

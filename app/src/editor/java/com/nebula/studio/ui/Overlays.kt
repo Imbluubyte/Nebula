@@ -84,14 +84,37 @@ private fun TextPrompt(studio: Studio, title: String, label: String, initial: St
 
 @Composable
 private fun ImportGitHubDialog(studio: Studio) {
-    var url by remember { mutableStateOf("") }
-    fun go(u: String) { if (u.isNotBlank()) { studio.modal = null; studio.importGitHub(u) } }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var repo by remember { mutableStateOf("") }          // "owner/repo" (a full address pasted here works too)
+    var name by remember { mutableStateOf("") }
+    var pkg by remember { mutableStateOf("") }
+    var nameEdited by remember { mutableStateOf(false) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { studio.importError = null }
+    fun repoName(s: String): String = try { nebula.core.GitHubImport.parse(s).name } catch (e: Exception) { "" }
+    fun go() {
+        if (studio.importBusy) return
+        try { nebula.core.GitHubImport.parse(repo) } catch (e: Exception) { problem = e.message; return }
+        if (pkg.isNotBlank() && !nebula.core.ProjectImport.isPackageId(pkg.trim())) { problem = "the package id must look like com.example.mygame"; return }
+        problem = null
+        studio.importGitHub(repo, name.ifBlank { repoName(repo) }, pkg)
+    }
+    Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Import from GitHub", color = C.text, fontSize = 18.sp)
-        Field("", { url = it; go(it) }, label = "Repository address", placeholder = "https://github.com/owner/repo", mono = true)
+        Text("Repository", color = C.dim, fontSize = 11.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("https://github.com/", color = C.dim, fontSize = 14.sp, fontFamily = Mono, modifier = Modifier.padding(end = 4.dp))
+            Field("", { }, Modifier.weight(1f), placeholder = "Imbluubyte/Nebula", mono = true,
+                onChange = { repo = it; problem = null; if (!nameEdited) name = repoName(it) })
+        }
+        Field(name, { }, label = "Project name", placeholder = "defaults to the repository name",
+            onChange = { name = it; nameEdited = it.isNotBlank() })
+        Field(pkg, { }, label = "Package id (optional)", placeholder = "com.example.mygame", mono = true, onChange = { pkg = it; problem = null })
         Text("Public repositories only. A copy is saved in the projects folder, and your changes are saved there automatically. A link to a branch (.../tree/branch) imports that branch.", color = C.dim, fontSize = 12.sp)
+        val shown = problem ?: studio.importError
+        if (shown != null) Text(shown, color = C.warn, fontSize = 13.sp)
+        if (studio.importBusy) Text("Downloading the repository...", color = C.accent2, fontSize = 13.sp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextBtn("Import", { go(url) }, primary = true); TextBtn("Cancel", { studio.modal = null })
+            TextBtn(if (studio.importBusy) "Importing..." else "Import", { go() }, primary = true); TextBtn("Cancel", { studio.modal = null })
         }
     }
 }

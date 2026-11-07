@@ -89,14 +89,14 @@ object TextFocus { var count = 0 }
 /** Dense single-line text input. Commits on Done / focus loss (so typing makes one undo step, not one per key). */
 @Composable
 fun Field(value: String, onCommit: (String) -> Unit, modifier: Modifier = Modifier, label: String? = null,
-          number: Boolean = false, mono: Boolean = false, placeholder: String = "") {
+          number: Boolean = false, mono: Boolean = false, placeholder: String = "", onChange: ((String) -> Unit)? = null) {
     var text by remember(value) { mutableStateOf(value) }
     var focused by remember { mutableStateOf(false) }
     DisposableEffect(Unit) { onDispose { if (focused) TextFocus.count = maxOf(0, TextFocus.count - 1) } }
     Column(modifier) {
         if (label != null) Text(label, color = C.dim, fontSize = 11.sp, modifier = Modifier.padding(bottom = 2.dp))
         BasicTextField(
-            value = text, onValueChange = { text = it }, singleLine = true,
+            value = text, onValueChange = { text = it; onChange?.invoke(it) }, singleLine = true,
             textStyle = TextStyle(color = C.text, fontSize = 14.sp, fontFamily = if (mono) Mono else FontFamily.Default),
             cursorBrush = SolidColor(C.accent2),
             keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Decimal else KeyboardType.Text, imeAction = ImeAction.Done),

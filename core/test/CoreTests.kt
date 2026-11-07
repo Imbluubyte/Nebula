@@ -661,7 +661,51 @@ fun main(args: Array<String>) {
         check("github: a missing or private repository says only public ones work", missing is ProjectImport.ImportException && missing.message!!.contains("public"), missing.toString())
         val offline = runCatching { GitHubImport.import("o/offline", root, File(base, "scratch"), fake) }.exceptionOrNull()
         check("github: no connection is explained", offline is ProjectImport.ImportException && offline.message!!.contains("internet"), offline.toString())
+        val g4 = GitHubImport.import("o/plain", root, File(base, "scratch"), fake, title = "My Copy", packageId = "com.me.copy")
+        check("github: the chosen project name and package id win", g4.title == "My Copy" && g4.packageId == "com.me.copy" && g4.dir.name == "My Copy", g4.dir.name + " " + g4.packageId)
+        val g5 = GitHubImport.import("o/game", root, File(base, "scratch"), fake, title = "", packageId = "")
+        check("github: blank choices keep the repository's own title and package", g5.title == "Star Game", g5.title)
+        check("github: a bad package id makes no request", run { asked.clear(); val e = runCatching { GitHubImport.import("o/plain", root, File(base, "scratch"), fake, packageId = "Not A Package") }.exceptionOrNull(); e is ProjectImport.ImportException && asked.isEmpty() })
         check("github: a bad address makes no request", run { asked.clear(); runCatching { GitHubImport.import("https://example.com/a/b", root, File(base, "scratch"), fake) }; asked.isEmpty() })
+    }
+
+    // --- vector sprites: shapes, hit tests, fill, frames, undo, the .nvec file
+    run {
+        val red = 0xFFFF0000.toInt(); val blue = 0xFF0000FF.toInt()
+        val d = VectorDoc.blank(64, 64)
+        d.add(VShape(VShape.Kind.Rect, floatArrayOf(10f, 10f, 30f, 30f), red, 0, 2f))
+        d.add(VShape(VShape.Kind.Ellipse, floatArrayOf(40f, 40f, 60f, 60f), 0, blue, 1f))
+        check("vector: shapes are added in order", d.frame.size == 2 && d.frame[0].kind == VShape.Kind.Rect)
+        check("vector: an outline is hit on its edge, not inside", d.topAt(10f, 20f, 0.5f) == 0 && d.topAt(20f, 20f, 0.5f) == -1)
+        check("vector: a filled shape is hit anywhere inside, not outside its curve", d.topAt(50f, 50f, 0f) == 1 && d.topAt(41f, 41f, 0f) == -1)
+        check("vector: the eyedropper reads the top-most shape", d.colorAt(50f, 50f) == blue && d.colorAt(10f, 20f) == red && d.colorAt(1f, 1f) == null)
+        check("vector: the paint bucket fills the shape under it and keeps its line", d.fillAt(20f, 20f, blue, 1f) && d.frame[0].fill == blue && d.frame[0].stroke == red)
+        check("vector: filling the same colour again changes nothing", !d.fillAt(20f, 20f, blue, 1f) && !d.fillAt(3f, 3f, red, 1f))
+        d.undo(); check("vector: undo takes the fill back", d.frame[0].fill == 0); d.redo(); check("vector: redo puts it back", d.frame[0].fill == blue)
+        check("vector: the object eraser removes the shapes it touched in one step", d.remove(d.hitAll(50f, 50f, 1f)) && d.frame.size == 1 && !d.remove(emptyList()))
+        d.undo(); check("vector: undo brings an erased shape back", d.frame.size == 2)
+        val path = VShape(VShape.Kind.Path, floatArrayOf(0f, 0f, 10f, 0f, 10f, 10f, 0f, 10f), red, 0, 1f)
+        check("vector: a freehand stroke can be filled like a closed shape", path.closed && path.contains(5f, 5f) && !path.contains(15f, 5f))
+        check("vector: opacity goes into the alpha", Argb.a(VectorDoc.tint(red, 0.5f)) == 128 && VectorDoc.tint(red, 1f) == red)
+
+        val fr = VectorDoc.blank(8, 8); fr.add(path)
+        fr.addFrame(copy = true); check("vector: a copied frame has the shapes", fr.frameCount == 2 && fr.current == 1 && fr.frame.size == 1)
+        fr.addFrame(copy = false); check("vector: a blank frame has none", fr.frameCount == 3 && fr.frame.isEmpty())
+        fr.select(1); check("vector: onion skin picks the neighbours, wrapping when it loops", fr.onion(1, 1, false).size == 2 && fr.onion(1, 0, true).map { it.index } == listOf(0))
+        fr.select(0); check("vector: the frame before the first is the last in a loop", fr.onion(1, 0, true).map { it.index } == listOf(2) && fr.onion(1, 0, false).isEmpty())
+        fr.moveFrame(1); check("vector: frames move", fr.current == 1)
+        fr.deleteFrame(); check("vector: frames delete", fr.frameCount == 2)
+        val asFrames: FrameDoc = fr; check("vector: it can be used as any frame document", asFrames.frameCount == 2 && asFrames.canUndo)
+
+        val f = VectorDoc(32, 16, listOf(
+            listOf(VShape(VShape.Kind.Path, floatArrayOf(1f, 2f, 3.5f, 4.25f), red, 0, 3f), VShape(VShape.Kind.Line, floatArrayOf(0f, 0f, 5f, 5f), blue, 0, 1f)),
+            listOf(VShape(VShape.Kind.Ellipse, floatArrayOf(2f, 3f, 9f, 8f), 0, 0x80FF0000.toInt(), 1f))))
+        val back = VectorFile.parse(VectorFile.toText(f))
+        check("vector: the .nvec text round-trips", back != null && back.width == 32 && back.height == 16 && back.frameCount == 2 && back.frames[0].size == 2 &&
+            back.frames[0][0].pts.toList() == listOf(1f, 2f, 3.5f, 4.25f) && back.frames[1][0].fill == 0x80FF0000.toInt() && back.frames[0][1].stroke == blue && back.frames[0][0].width == 3f)
+        check("vector: garbage is not a vector file", VectorFile.parse("hello") == null && VectorFile.parse("size 0 0\nframe\n") == null)
+        check("vector: a bad shape line is skipped, a good one kept", VectorFile.parse("size 4 4\nframe\nrect #FF0000 nope 1 0 0 1 1\nline #FF0000 #00000000 1 0 0 3 3\n")?.frame?.size == 1)
+        check("vector: the vector file sits next to the png", VectorFile.extensionOf("assets/sub/hero.png") == "assets/sub/hero.nvec")
     }
 
     // --- DynamicBar script API compiles with snc and the bar scene loads

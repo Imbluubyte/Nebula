@@ -226,9 +226,13 @@ Broadcasts: `expired`, `died`, `damaged(amount)`. Spawned bodies are placed in t
 
 ### Drawing sprites
 
-The built-in sprite editor draws pixel art and regular pictures (PNG). Open it from the Files tab (brush icon = new sprite, tap an image = edit it), from the Inspector
+The built-in sprite editor draws pixel art, regular pictures and vector sprites (PNG). Open it from the Files tab (brush icon = new sprite, tap an image = edit it), from the Inspector
 (**Edit in sprite editor** under a Sprite's `image`) or the command palette. One finger uses the tool, two fingers pan and zoom (mouse wheel zooms).
 
+* **Pixel or vector**: *New sprite* asks which, and a sprite is one or the other for good. A vector sprite is made of shapes (freehand strokes, lines, rectangles,
+  ellipses) that stay editable: the eraser removes whole shapes, Fill colours the closed shape you tap (outlines keep their line), the eyedropper picks a shape's colour,
+  and the brush size is the line width. Colour, opacity, undo / redo, frames, onion skin and Play work as in pixel art. It is saved as `name.png` (what the game draws, made from the
+  shapes) plus `name.nvec` (the shapes themselves): keep the two together, and tap the PNG (or the `.nvec`) in the Files tab to edit it as vector again.
 * **Tools**: brush, eraser, fill (paint bucket), eyedropper (picks the colour under your finger), line, rectangle and ellipse (outline or filled).
 * **Brush size and opacity**: two sliders. **Pixel brush** is hard edged, **Soft brush** is anti-aliased. Opacity does not build up inside one stroke.
 * **Colour**: hue / saturation / brightness sliders, a hex field, a 16 colour palette and your recent colours.
@@ -238,6 +242,10 @@ The built-in sprite editor draws pixel art and regular pictures (PNG). Open it f
 * **Saving**: automatic (every few seconds and on Done). Frames are saved as one PNG sheet, frames side by side. A sheet that an animation set (`.nanim`) describes opens as its
   frames and keeps that grid; a new animated sprite gets an animation set with a clip `all` (all frames, 8 fps, loops), and an existing set's grid follows the frame count.
   A JPG or WebP opens too, but is saved as a PNG next to the original.
+* **Using the animation in a game**: the animation is *not* inside the PNG. The PNG is only the sheet, all frames side by side. The animation is the small text file
+  `animations/<name>.nanim` that the editor makes for you: it names the sheet, its grid (columns x rows) and the clips (first frame, last frame, speed, loop; the first clip is `all`).
+  Give a Sprite node that file (Inspector: `animations` = the `.nanim`, `animation` = a clip name such as `all`, `playing` on), or do it from a script:
+  `sprite.setAnimations("animations/hero.nanim")` then `sprite.animate("all")`. Make more clips (walk, jump, ...) in the animation manager (film icon in the Files tab).
 
 ### Sounds and animation
 * **Sound effects**: import `.wav`/`.ogg`/`.mp3` files, then call `play("assets/hit.wav")` from a script, or add a **Sound** node (volume, pitch, loop, autoplay)

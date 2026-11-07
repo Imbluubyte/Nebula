@@ -18,6 +18,10 @@ object ProjectImport {
     private val skipNames = setOf(".git", "__MACOSX", ".DS_Store", "Thumbs.db")
     fun isJunk(name: String) = name in skipNames
 
+    private val packageRe = Regex("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+")
+    /** True for an Android package id like com.example.mygame (the same rule the APK export uses). */
+    fun isPackageId(s: String) = packageRe.matches(s)
+
     /** Unzips [input] into [into]. Entries that would land outside it are refused; huge archives are refused too. */
     fun unzip(input: InputStream, into: File) {
         into.mkdirs()
@@ -96,15 +100,18 @@ object ProjectImport {
      * Missing parts are filled in: project.nebula, the scenes / scripts / assets / animations folders and a main scene that exists.
      * With [move] the files are moved instead of copied when possible (use it for a folder you made yourself, like an unzipped archive).
      */
-    fun adopt(src: File, root: File, nameHint: String, move: Boolean = false): Project {
+    fun adopt(src: File, root: File, nameHint: String, move: Boolean = false, chosenTitle: String? = null, chosenPackage: String? = null): Project {
         val found = findRoot(src)
         val title = File(found, "project.nebula").takeIf { it.isFile }?.let { Project(found).config.getProperty("title") }
-        val dest = uniqueDir(root.also { it.mkdirs() }, cleanName(title ?: nameHint))
+        val chosen = chosenTitle?.takeIf { it.isNotBlank() }?.let { cleanName(it) }
+        val dest = uniqueDir(root.also { it.mkdirs() }, chosen ?: cleanName(title ?: nameHint))
         var moved = false
         if (move) moved = found.renameTo(dest)
         if (!moved) { copyTree(found, dest, true) } else File(dest, "build").deleteRecursively()
         val p = Project(dest)
         if (!File(dest, "project.nebula").isFile) { p.title = dest.name; p.packageId = "com.nebula." + dest.name.lowercase().replace(Regex("[^a-z0-9]"), "").ifEmpty { "game" } }
+        if (chosen != null) p.title = chosen
+        if (!chosenPackage.isNullOrBlank()) p.packageId = chosenPackage.trim()
         for (r in Project.ROOTS) File(dest, r).mkdirs()
         if (!p.file(p.mainScene).isFile) {
             val scenes = p.scenes()
@@ -122,11 +129,11 @@ object ProjectImport {
     }
 
     /** Opens a zip as a project: unpacks it (through a scratch folder under [scratch]) and moves the result into [root]. */
-    fun importZip(input: InputStream, root: File, nameHint: String, scratch: File): Project {
+    fun importZip(input: InputStream, root: File, nameHint: String, scratch: File, chosenTitle: String? = null, chosenPackage: String? = null): Project {
         val stage = File(scratch, "import-${System.nanoTime()}")
         try {
             unzip(input, stage)
-            return adopt(stage, root, nameHint.removeSuffix(".zip").removeSuffix(".ZIP"), move = true)
+            return adopt(stage, root, nameHint.removeSuffix(".zip").removeSuffix(".ZIP"), move = true, chosenTitle = chosenTitle, chosenPackage = chosenPackage)
         } finally { stage.deleteRecursively() }
     }
 }
