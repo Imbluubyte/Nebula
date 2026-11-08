@@ -22,8 +22,10 @@ import com.nebula.studio.runtime.GameView
 @Composable
 fun StudioScreen(studio: Studio) {
     val project = studio.project
-    Box(Modifier.fillMaxSize().background(C.bg).windowInsetsPadding(WindowInsets.systemBars)) {
-        if (project == null) WelcomeScreen(studio) else {
+    // The system bar at the bottom (gesture bar, taskbar, navigation buttons) is NOT kept free here: the status bar draws through it, so no empty
+    // strip is left between the bar and the bottom edge of the screen. Everything else that sits at the bottom keeps clear of it itself.
+    Box(Modifier.fillMaxSize().background(C.bg).windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+        if (project == null) Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.navigationBars)) { WelcomeScreen(studio) } else {
             val wide = LocalConfiguration.current.screenWidthDp >= 900
             Column(Modifier.fillMaxSize()) {
                 TopBar(studio)
@@ -68,7 +70,10 @@ private fun TopBar(studio: Studio) {
 @Composable
 private fun StatusBar(studio: Studio) {
     val d = studio.lowered?.diags?.size ?: 0
-    Row(Modifier.fillMaxWidth().height(26.dp).background(C.panel).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    // The bar's colour runs down to the very bottom of the screen. Only where the system puts something to tap there (the three navigation
+    // buttons) does the text keep clear of it; the thin gesture bar is not one of those, so with gestures the bar sits right on the edge.
+    Row(Modifier.fillMaxWidth().background(C.panel).windowInsetsPadding(WindowInsets.tappableElement.only(WindowInsetsSides.Bottom)).height(26.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         Text(studio.status.ifEmpty { "Ready" }, color = C.dim, fontSize = 11.sp, modifier = Modifier.weight(1f))
         if (d > 0) Text("$d script error(s)  ", color = C.err, fontSize = 11.sp)
         Text(if (studio.editor?.dirty == true) "unsaved changes" else "saved", color = C.dim, fontSize = 11.sp)

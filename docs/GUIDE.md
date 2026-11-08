@@ -227,15 +227,15 @@ Broadcasts: `expired`, `died`, `damaged(amount)`. Spawned bodies are placed in t
 ### Drawing sprites
 
 The built-in sprite editor draws pixel art, regular pictures and vector sprites (PNG). Open it from the Files tab (brush icon = new sprite, tap an image = edit it), from the Inspector
-(**Edit in sprite editor** under a Sprite's `image`) or the command palette. One finger uses the tool, two fingers pan and zoom (mouse wheel zooms).
+(**Edit in sprite editor** under a Sprite's `image`) or the command palette. One finger uses the tool, two fingers pan and zoom (mouse wheel zooms). A quick **tap with two fingers undoes, with three fingers redoes** (the word Undo / Redo flashes on the canvas).
 
 * **Pixel or vector**: *New sprite* asks which, and a sprite is one or the other for good. A vector sprite is made of shapes (freehand strokes, lines, rectangles,
-  ellipses) that stay editable: the eraser removes whole shapes, Fill colours the closed shape you tap (outlines keep their line), the eyedropper picks a shape's colour,
+  ellipses) that stay editable: the eraser rubs out just the part of a line it passes over (what is left on either side stays as separate lines; a shape that is only a fill goes whole when touched, and one with a line and a fill loses only the part of its line unless you erase well inside it), Fill colours the closed shape you tap (outlines keep their line), the eyedropper picks a shape's colour,
   and the brush size is the line width. Colour, opacity, undo / redo, frames, onion skin and Play work as in pixel art. It is saved as `name.png` (what the game draws, made from the
   shapes) plus `name.nvec` (the shapes themselves): keep the two together, and tap the PNG (or the `.nvec`) in the Files tab to edit it as vector again.
 * **Tools**: brush, eraser, fill (paint bucket), eyedropper (picks the colour under your finger), line, rectangle and ellipse (outline or filled).
 * **Brush size and opacity**: two sliders. **Pixel brush** is hard edged, **Soft brush** is anti-aliased. Opacity does not build up inside one stroke.
-* **Colour**: hue / saturation / brightness sliders, a hex field, a 16 colour palette and your recent colours.
+* **Colour**: tap the big colour square for a **colour wheel** (drag round for hue, towards the middle for less saturation, plus a brightness slider and a hex field), or use the hue / saturation / brightness sliders, a hex field, a 16 colour palette and your recent colours.
 * **Undo / redo**: every stroke, shape, fill and frame change is one step.
 * **Frames and onion skin**: add a blank or copied frame, delete, move and clear frames. **Onion skin** shows the frames before (red) and after (green) the current one
   faintly, so each drawing lines up with its neighbours; *Before* / *After* set how many, *Loops* treats the animation as a loop. **Play** previews the animation.

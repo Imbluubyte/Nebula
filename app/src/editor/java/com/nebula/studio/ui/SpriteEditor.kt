@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
@@ -45,6 +47,8 @@ import com.nebula.studio.Studio
 import kotlinx.coroutines.delay
 import nebula.core.Argb
 import nebula.core.VShape
+import kotlin.math.atan2
+import kotlin.math.hypot
 
 private fun bitmapOf(px: IntArray, w: Int, h: Int): ImageBitmap = Bitmap.createBitmap(px, w, h, Bitmap.Config.ARGB_8888).asImageBitmap()
 
@@ -58,33 +62,36 @@ fun SpriteEditor(studio: Studio) {
     if (s == null) { Text("No picture is open.", color = C.dim); return }
     s.tick
     val doc = s.doc
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Column(Modifier.weight(1f)) {
-                Text(s.path.substringAfterLast('/'), color = C.text, fontSize = 18.sp, maxLines = 1)
-                Text("${doc.width} x ${doc.height} px, ${if (s.isVector) "vector, " else ""}${doc.frameCount} frame" + (if (doc.frameCount == 1) "" else "s") + if (s.dirty) "  (saving...)" else "  saved", color = C.dim, fontSize = 11.sp)
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(s.path.substringAfterLast('/'), color = C.text, fontSize = 18.sp, maxLines = 1)
+                    Text("${doc.width} x ${doc.height} px, ${if (s.isVector) "vector, " else ""}${doc.frameCount} frame" + (if (doc.frameCount == 1) "" else "s") + if (s.dirty) "  (saving...)" else "  saved", color = C.dim, fontSize = 11.sp)
+                }
+                TextBtn("Undo", { s.undo() }, enabled = doc.canUndo)
+                TextBtn("Redo", { s.redo() }, enabled = doc.canRedo)
+                TextBtn("Done", { studio.closeSprite() }, primary = true)
             }
-            TextBtn("Undo", { s.undo() }, enabled = doc.canUndo)
-            TextBtn("Redo", { s.redo() }, enabled = doc.canRedo)
-            TextBtn("Done", { studio.closeSprite() }, primary = true)
-        }
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-            if (maxWidth >= 640.dp) {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                if (maxWidth >= 640.dp) {
+                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SpriteCanvas(s, Modifier.fillMaxWidth().weight(1f))
+                            FramesPanel(s)
+                        }
+                        Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { ToolsPanel(s) }
+                    }
+                } else {
+                    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         SpriteCanvas(s, Modifier.fillMaxWidth().weight(1f))
                         FramesPanel(s)
+                        Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { ToolsPanel(s) }
                     }
-                    Column(Modifier.width(300.dp).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { ToolsPanel(s) }
-                }
-            } else {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SpriteCanvas(s, Modifier.fillMaxWidth().weight(1f))
-                    FramesPanel(s)
-                    Column(Modifier.fillMaxWidth().heightIn(max = 200.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { ToolsPanel(s) }
                 }
             }
         }
+        if (s.wheelOpen) ColorWheelOverlay(s)
     }
 }
 
@@ -111,76 +118,92 @@ private fun SpriteCanvas(s: SpriteSession, modifier: Modifier) {
         }
     }
     val shapes = vd?.frame
-    Canvas(modifier.clip(RoundedCornerShape(8.dp)).background(C.bg)
-        .onSizeChanged { s.viewW = it.width.toFloat(); s.viewH = it.height.toFloat(); if (s.zoom == 0f) s.refit() }
-        .pointerInput(s) {                                   // mouse wheel zoom
-            awaitPointerEventScope {
-                while (true) {
-                    val ev = awaitPointerEvent()
-                    if (ev.type == PointerEventType.Scroll && s.zoom > 0f) {
-                        val c = ev.changes.first(); val dy = c.scrollDelta.y
-                        if (dy != 0f) { s.transform(c.position, if (dy < 0f) 1.15f else 1f / 1.15f, Offset.Zero); c.consume() }
+    val msg = s.toast
+    LaunchedEffect(s.toastId) { if (s.toast != null) { delay(900); s.toast = null } }
+    Box(modifier) {
+        Canvas(Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)).background(C.bg)
+            .onSizeChanged { s.viewW = it.width.toFloat(); s.viewH = it.height.toFloat(); if (s.zoom == 0f) s.refit() }
+            .pointerInput(s) {                                   // mouse wheel zoom
+                awaitPointerEventScope {
+                    while (true) {
+                        val ev = awaitPointerEvent()
+                        if (ev.type == PointerEventType.Scroll && s.zoom > 0f) {
+                            val c = ev.changes.first(); val dy = c.scrollDelta.y
+                            if (dy != 0f) { s.transform(c.position, if (dy < 0f) 1.15f else 1f / 1.15f, Offset.Zero); c.consume() }
+                        }
                     }
                 }
             }
+            .pointerInput(s) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (s.zoom == 0f) return@awaitEachGesture
+                    val slop = viewConfiguration.touchSlop * 2f              // how far fingers may wander and still count as a tap
+                    val tapTime = viewConfiguration.longPressTimeoutMillis   // how long a tap may last
+                    val origin = HashMap<PointerId, Offset>(); origin[down.id] = down.position
+                    var most = 1; var wander = 0f; var multi = false; var panning = false; var lastTime = down.uptimeMillis
+                    s.begin(down.position)
+                    do {
+                        val ev = awaitPointerEvent()
+                        val pressed = ev.changes.filter { it.pressed }
+                        lastTime = ev.changes.maxOf { it.uptimeMillis }
+                        for (c in ev.changes) { val o = origin.getOrPut(c.id) { c.position }; if (c.pressed) wander = maxOf(wander, (c.position - o).getDistance()) }
+                        most = maxOf(most, pressed.size)
+                        if (pressed.size >= 2) {                 // two fingers: pan and zoom, and whatever the first finger drew is dropped
+                            if (!multi) { multi = true; s.cancel() }
+                            if (wander > slop) panning = true    // only once the fingers really move, so a tap does not nudge the picture
+                            if (panning) s.transform(ev.calculateCentroid(), ev.calculateZoom(), ev.calculatePan())
+                            ev.changes.forEach { it.consume() }
+                        } else if (!multi) {
+                            val c = ev.changes.firstOrNull { it.id == down.id }
+                            if (c != null && c.pressed) { s.move(c.position); c.consume() }
+                        }
+                    } while (ev.changes.any { it.pressed })
+                    if (!multi) s.end()
+                    else if (!panning && lastTime - down.uptimeMillis <= tapTime) {      // quick tap with 2 fingers = undo, with 3 = redo
+                        if (most == 2) s.tapUndo() else if (most == 3) s.tapRedo()
+                    }
+                }
+            }) {
+            if (s.zoom == 0f) return@Canvas
+            val z = s.zoom; val ox = s.panX; val oy = s.panY
+            val pw = w * z; val ph = h * z
+            val x0 = Math.max(ox, 0f); val x1 = Math.min(ox + pw, size.width); val y0 = Math.max(oy, 0f); val y1 = Math.min(oy + ph, size.height)
+            if (x1 > x0 && y1 > y0) clipRect(x0, y0, x1, y1) {
+                // checkerboard: shows what is see-through
+                val cell = 12f
+                drawRect(Color(0xFF2A2D4F), Offset(x0, y0), Size(x1 - x0, y1 - y0))
+                var j = Math.floor(((y0 - oy) / cell).toDouble()).toInt()
+                while (oy + j * cell < y1) {
+                    var i = Math.floor(((x0 - ox) / cell).toDouble()).toInt()
+                    while (ox + i * cell < x1) {
+                        if ((i + j) % 2 == 0) drawRect(Color(0xFF3A3E66), Offset(ox + i * cell, oy + j * cell), Size(cell, cell))
+                        i++
+                    }
+                    j++
+                }
+                translate(ox, oy) {
+                    scale(z, z, Offset.Zero) {
+                        if (image != null) {
+                            for (g in ghosts) drawImage(g, filterQuality = FilterQuality.None)      // earlier frames red, later frames green
+                            drawImage(image, filterQuality = FilterQuality.None)
+                        } else if (shapes != null) {
+                            for ((gs, tint, fade) in vGhosts) drawShapes(gs, tint = tint, alpha = fade)
+                            drawShapes(s.erasePreview ?: shapes)                                     // while erasing: the picture as the eraser leaves it
+                            s.draft?.let { drawShapes(listOf(it)) }                                  // the shape being drawn
+                        }
+                    }
+                }
+                if (px != null && s.grid && z >= 6f) {
+                    val gc = Color(0x33FFFFFF)
+                    for (i in Math.max(0, Math.floor(((x0 - ox) / z).toDouble()).toInt())..Math.min(w, Math.ceil(((x1 - ox) / z).toDouble()).toInt())) drawLine(gc, Offset(ox + i * z, y0), Offset(ox + i * z, y1), 1f)
+                    for (i in Math.max(0, Math.floor(((y0 - oy) / z).toDouble()).toInt())..Math.min(h, Math.ceil(((y1 - oy) / z).toDouble()).toInt())) drawLine(gc, Offset(x0, oy + i * z), Offset(x1, oy + i * z), 1f)
+                }
+            }
+            drawRect(Color(0x88FFFFFF), Offset(ox, oy), Size(pw, ph), style = Stroke(1f))
         }
-        .pointerInput(s) {
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                if (s.zoom == 0f) return@awaitEachGesture
-                var multi = false
-                s.begin(down.position)
-                do {
-                    val ev = awaitPointerEvent()
-                    val pressed = ev.changes.filter { it.pressed }
-                    if (pressed.size >= 2) {                 // two fingers: pan and zoom, and whatever the first finger drew is dropped
-                        if (!multi) { multi = true; s.cancel() }
-                        s.transform(ev.calculateCentroid(), ev.calculateZoom(), ev.calculatePan())
-                        ev.changes.forEach { it.consume() }
-                    } else if (!multi) {
-                        val c = ev.changes.firstOrNull { it.id == down.id }
-                        if (c != null && c.pressed) { s.move(c.position); c.consume() }
-                    }
-                } while (ev.changes.any { it.pressed })
-                if (!multi) s.end()
-            }
-        }) {
-        if (s.zoom == 0f) return@Canvas
-        val z = s.zoom; val ox = s.panX; val oy = s.panY
-        val pw = w * z; val ph = h * z
-        val x0 = Math.max(ox, 0f); val x1 = Math.min(ox + pw, size.width); val y0 = Math.max(oy, 0f); val y1 = Math.min(oy + ph, size.height)
-        if (x1 > x0 && y1 > y0) clipRect(x0, y0, x1, y1) {
-            // checkerboard: shows what is see-through
-            val cell = 12f
-            drawRect(Color(0xFF2A2D4F), Offset(x0, y0), Size(x1 - x0, y1 - y0))
-            var j = Math.floor(((y0 - oy) / cell).toDouble()).toInt()
-            while (oy + j * cell < y1) {
-                var i = Math.floor(((x0 - ox) / cell).toDouble()).toInt()
-                while (ox + i * cell < x1) {
-                    if ((i + j) % 2 == 0) drawRect(Color(0xFF3A3E66), Offset(ox + i * cell, oy + j * cell), Size(cell, cell))
-                    i++
-                }
-                j++
-            }
-            translate(ox, oy) {
-                scale(z, z, Offset.Zero) {
-                    if (image != null) {
-                        for (g in ghosts) drawImage(g, filterQuality = FilterQuality.None)      // earlier frames red, later frames green
-                        drawImage(image, filterQuality = FilterQuality.None)
-                    } else if (shapes != null) {
-                        for ((gs, tint, fade) in vGhosts) drawShapes(gs, tint = tint, alpha = fade)
-                        drawShapes(shapes, dim = s.erasing)
-                        s.draft?.let { drawShapes(listOf(it)) }                                  // the shape being drawn
-                    }
-                }
-            }
-            if (px != null && s.grid && z >= 6f) {
-                val gc = Color(0x33FFFFFF)
-                for (i in Math.max(0, Math.floor(((x0 - ox) / z).toDouble()).toInt())..Math.min(w, Math.ceil(((x1 - ox) / z).toDouble()).toInt())) drawLine(gc, Offset(ox + i * z, y0), Offset(ox + i * z, y1), 1f)
-                for (i in Math.max(0, Math.floor(((y0 - oy) / z).toDouble()).toInt())..Math.min(h, Math.ceil(((y1 - oy) / z).toDouble()).toInt())) drawLine(gc, Offset(x0, oy + i * z), Offset(x1, oy + i * z), 1f)
-            }
-        }
-        drawRect(Color(0x88FFFFFF), Offset(ox, oy), Size(pw, ph), style = Stroke(1f))
+        if (msg != null) Text(msg, color = C.text, fontSize = 13.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 10.dp)
+            .clip(RoundedCornerShape(16.dp)).background(Color(0xCC000000)).padding(horizontal = 14.dp, vertical = 6.dp))
     }
 }
 
@@ -192,7 +215,7 @@ private fun ToolsPanel(s: SpriteSession) {
         for (t in row) TextBtn(t.label, { s.tool = t }, Modifier.weight(1f), primary = s.tool == t)
         repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
     }
-    if (s.isVector) Text("Vector sprite: the eraser removes whole shapes, Fill colours the closed shape you tap, the eyedropper picks a shape's colour.", color = C.dim, fontSize = 11.sp)
+    if (s.isVector) Text("Vector sprite: the eraser rubs out the part of a line it passes over (a shape that is only a fill goes whole), Fill colours the closed shape you tap, the eyedropper picks a shape's colour.", color = C.dim, fontSize = 11.sp)
     Column {
         Text(if (s.isVector) "Line width: ${s.size} px" else "Brush size: ${s.size} px", color = C.dim, fontSize = 12.sp)
         Slider(value = s.size.toFloat(), onValueChange = { s.size = Math.round(it).coerceIn(1, 64) }, valueRange = 1f..64f)
@@ -208,7 +231,8 @@ private fun ToolsPanel(s: SpriteSession) {
 
     // colour: swatch, hex, hue / saturation / brightness, palette, recently used
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-        Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF3A3E66)).border(1.dp, C.dim, RoundedCornerShape(10.dp))) { Box(Modifier.fillMaxSize().background(Color(s.color))) }
+        Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF3A3E66)).border(1.dp, C.dim, RoundedCornerShape(10.dp))
+            .clickable { s.wheelOpen = true }) { Box(Modifier.fillMaxSize().background(Color(s.color))) }      // tap the square: colour wheel
         Field(Argb.hex(s.color), { v -> Argb.parse(v)?.let { s.chooseColor(it) } }, Modifier.weight(1f), label = "Colour (hex, #RRGGBB)", mono = true)
     }
     val hsv = s.hsv()
@@ -224,7 +248,63 @@ private fun ToolsPanel(s: SpriteSession) {
     if (s.recent.isNotEmpty()) Swatches("Recent", s.recent.toList(), s)
     if (!s.isVector) TextBtn(if (s.grid) "Pixel grid: on" else "Pixel grid: off", { s.grid = !s.grid }, Modifier.fillMaxWidth())
     TextBtn("Fit picture to view", { s.refit() }, Modifier.fillMaxWidth())
-    Text("One finger draws, two fingers move and zoom.", color = C.dim, fontSize = 11.sp)
+    Text("One finger draws, two fingers move and zoom. Tap with two fingers to undo, with three to redo. Tap the colour square for a colour wheel.", color = C.dim, fontSize = 11.sp)
+}
+
+/** The colour wheel, on top of the sprite editor: tap the big colour square to open it, tap outside it or press Done to close it. */
+@Composable
+private fun ColorWheelOverlay(s: SpriteSession) {
+    val hsv = s.hsv()
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xE60F1020)).clickable { s.wheelOpen = false }, contentAlignment = Alignment.Center) {
+        val wheel = minOf(260.dp, maxWidth - 64.dp, maxHeight - 250.dp).coerceAtLeast(120.dp)
+        Column(Modifier.widthIn(max = 340.dp).clip(RoundedCornerShape(16.dp)).background(C.panel2).clickable(enabled = false) {}
+            .verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Colour wheel", color = C.text, fontSize = 18.sp)
+            ColorWheel(s, Modifier.size(wheel))
+            Column(Modifier.fillMaxWidth()) {
+                Text("Brightness", color = C.dim, fontSize = 11.sp)
+                Slider(value = hsv[2], onValueChange = { s.setHsv(s.hue, hsv[1], it) }, valueRange = 0f..1f)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF3A3E66)).border(1.dp, C.dim, RoundedCornerShape(10.dp))) { Box(Modifier.fillMaxSize().background(Color(s.color))) }
+                Field(Argb.hex(s.color), { v -> Argb.parse(v)?.let { s.chooseColor(it) } }, Modifier.weight(1f), label = "Colour (hex, #RRGGBB)", mono = true)
+            }
+            TextBtn("Done", { s.wheelOpen = false }, Modifier.fillMaxWidth(), primary = true)
+        }
+    }
+}
+
+/** A round colour picker: the angle round the middle is the hue, the distance from the middle is the saturation; drag anywhere on it. */
+@Composable
+private fun ColorWheel(s: SpriteSession, modifier: Modifier) {
+    Canvas(modifier.pointerInput(s) {
+        fun pick(p: Offset) {
+            val r = size.width / 2f
+            val dx = p.x - r; val dy = p.y - r
+            var deg = Math.toDegrees(atan2(dy, dx).toDouble()).toFloat(); if (deg < 0f) deg += 360f
+            s.setHsv(deg, (hypot(dx, dy) / r).coerceIn(0f, 1f), s.hsv()[2])
+        }
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            pick(down.position); down.consume()
+            do {
+                val ev = awaitPointerEvent()
+                val c = ev.changes.firstOrNull()
+                if (c != null && c.pressed) { pick(c.position); c.consume() }
+            } while (ev.changes.any { it.pressed })
+        }
+    }) {
+        val r = size.minDimension / 2f; val mid = Offset(size.width / 2f, size.height / 2f)
+        val hsv = s.hsv()
+        drawCircle(Brush.sweepGradient(List(13) { Color.hsv((it * 30f) % 360f, 1f, 1f) }, mid), r, mid)         // hue all the way round
+        drawCircle(Brush.radialGradient(listOf(Color.White, Color.Transparent), mid, r), r, mid)               // towards white in the middle (saturation)
+        drawCircle(Color.Black.copy(alpha = 1f - hsv[2]), r, mid)                                               // darker with the brightness slider
+        val a = Math.toRadians(hsv[0].toDouble()); val d = hsv[1] * r
+        val at = Offset(mid.x + (Math.cos(a) * d).toFloat(), mid.y + (Math.sin(a) * d).toFloat())
+        drawCircle(Color(s.color or 0xFF000000.toInt()), 9f, at)
+        drawCircle(Color.White, 11f, at, style = Stroke(3f))
+        drawCircle(Color.Black, 13f, at, style = Stroke(1.5f))
+    }
 }
 
 @Composable

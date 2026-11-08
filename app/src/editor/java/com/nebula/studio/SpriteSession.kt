@@ -11,6 +11,7 @@ import nebula.core.FrameDoc
 import nebula.core.SpriteDoc
 import nebula.core.VShape
 import nebula.core.VectorDoc
+import nebula.core.VectorErase
 
 enum class SpriteTool(val label: String) {
     Brush("Brush"), Eraser("Eraser"), Fill("Fill"), Pick("Eyedropper"), Line("Line"), Rect("Rectangle"), Ellipse("Ellipse")
@@ -42,6 +43,11 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
     var filled by mutableStateOf(false)
     var grid by mutableStateOf(true)
     val recent = mutableStateListOf<Int>()
+    /** The colour wheel is open (tap the big colour square). */
+    var wheelOpen by mutableStateOf(false)
+    /** A word that flashes over the canvas ("Undo", "Redo"); [toastId] changes with every flash so the same word can flash twice in a row. */
+    var toast by mutableStateOf<String?>(null)
+    var toastId by mutableIntStateOf(0)
 
     var onion by mutableStateOf(false)
     var onionBefore by mutableIntStateOf(1)
@@ -59,14 +65,19 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
     var savedVersion by mutableIntStateOf(-1)
     val dirty get() = doc.version != savedVersion
 
+    // a finger is down and drawing; the colour from before it, because a second finger that joins undoes what the first one did (the eyedropper too)
+    private var touching = false
+    private var colorBefore = 0
+    private var hueBefore = 0f
+
     // pixel sprites: the stroke in progress
     private var stroke: SpriteDoc.Stroke? = null
     private var startX = 0; private var startY = 0; private var lastX = 0; private var lastY = 0
     private val px: SpriteDoc get() = doc as SpriteDoc
 
-    // vector sprites: the shape being drawn, and the shapes the eraser is passing over (removed when the finger lifts)
+    // vector sprites: the shape being drawn, and the picture as the eraser has left it so far (it becomes the frame when the finger lifts)
     var draft by mutableStateOf<VShape?>(null)
-    var erasing by mutableStateOf<Set<Int>>(emptySet())
+    var erasePreview by mutableStateOf<List<VShape>?>(null)
     private val vPts = ArrayList<Float>()
     private var vx0 = 0f; private var vy0 = 0f; private var vx1 = 0f; private var vy1 = 0f
     private var rawX = 0f; private var rawY = 0f
@@ -115,6 +126,7 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
 
     // ------------------------------------------------------------------ finger (the composable passes screen positions)
     fun begin(p: Offset) {
+        touching = true; colorBefore = color; hueBefore = hue
         if (isVector) vBegin((p.x - panX) / zoom, (p.y - panY) / zoom) else { val (x, y) = pixelAt(p); pBegin(x, y) }
     }
 
@@ -123,13 +135,23 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
     }
 
     /** The finger lifted: the stroke or shape is committed (one undo step), a fill is poured where the finger was, the eraser removes what it touched. */
-    fun end() { if (isVector) vEnd() else pEnd() }
+    fun end() { touching = false; if (isVector) vEnd() else pEnd() }
 
-    /** A second finger came down (pan / zoom): whatever the first finger was drawing is dropped. */
-    fun cancel() { stroke = null; draft = null; erasing = emptySet(); vPts.clear(); tick++ }
+    /** A second finger came down (pan / zoom / tap): whatever the first finger was drawing is dropped, and the eyedropper's pick is taken back. */
+    fun cancel() {
+        if (touching && tool == SpriteTool.Pick) { color = colorBefore; hue = hueBefore }
+        touching = false
+        stroke = null; draft = null; erasePreview = null; vPts.clear(); tick++
+    }
 
     fun undo() { cancel(); doc.undo() }
     fun redo() { cancel(); doc.redo() }
+
+    /** Two-finger tap: undo, and say so on the canvas (or say there is nothing to undo). */
+    fun tapUndo() { val can = doc.canUndo; undo(); flash(if (can) "Undo" else "Nothing to undo") }
+    /** Three-finger tap: redo. */
+    fun tapRedo() { val can = doc.canRedo; redo(); flash(if (can) "Redo" else "Nothing to redo") }
+    private fun flash(text: String) { toast = text; toastId++ }
     /** Run an edit of the picture (frames, clear) and redraw. */
     fun edit(op: (FrameDoc) -> Unit) { cancel(); op(doc); tick++ }
 
@@ -207,7 +229,7 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
         when (tool) {
             SpriteTool.Brush -> { vPts.add(cx); vPts.add(cy); draft = pathShape() }
             SpriteTool.Line, SpriteTool.Rect, SpriteTool.Ellipse -> draft = boxShape()
-            SpriteTool.Eraser -> erasing = d.hitAll(x, y, eraseTol()).toSet()
+            SpriteTool.Eraser -> erasePreview = VectorErase.along(d.frame, x, y, x, y, eraseTol())
             SpriteTool.Pick -> vPick(x, y)
             SpriteTool.Fill -> {}
         }
@@ -224,14 +246,8 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
                 if (dx * dx + dy * dy >= step * step) { vPts.add(cx); vPts.add(cy); draft = pathShape() }
             }
             SpriteTool.Line, SpriteTool.Rect, SpriteTool.Ellipse -> { vx1 = cx; vy1 = cy; draft = boxShape() }
-            SpriteTool.Eraser -> {
-                // look along the way from the last position too, so a quick swipe cannot skip over a thin shape
-                val tol = eraseTol()
-                val n = Math.ceil(Math.sqrt(((x - rawX) * (x - rawX) + (y - rawY) * (y - rawY)).toDouble()) / maxOf(tol, 0.5f)).toInt().coerceIn(1, 200)
-                var hit = erasing
-                for (k in 1..n) { val t = k.toFloat() / n; hit = hit + d.hitAll(rawX + (x - rawX) * t, rawY + (y - rawY) * t, tol) }
-                erasing = hit
-            }
+            // rub out along the whole way from the last position, so a quick swipe cannot skip over a thin line
+            SpriteTool.Eraser -> erasePreview = VectorErase.along(erasePreview ?: d.frame, rawX, rawY, x, y, eraseTol())
             SpriteTool.Pick -> vPick(x, y)
             SpriteTool.Fill -> {}
         }
@@ -245,11 +261,11 @@ class SpriteSession(val path: String, val doc: FrameDoc, var cols: Int, var rows
             SpriteTool.Line, SpriteTool.Rect, SpriteTool.Ellipse -> {
                 if (Math.abs(vx1 - vx0) + Math.abs(vy1 - vy0) >= 0.5f) { d.add(boxShape()); rememberColor(color) }
             }
-            SpriteTool.Eraser -> d.remove(erasing)
+            SpriteTool.Eraser -> erasePreview?.let { d.replaceShapes(it) }
             SpriteTool.Fill -> if (d.fillAt(vx1, vy1, color, opacity)) rememberColor(color)
             SpriteTool.Pick -> {}
         }
-        draft = null; erasing = emptySet(); vPts.clear(); tick++
+        draft = null; erasePreview = null; vPts.clear(); tick++
     }
 }
 

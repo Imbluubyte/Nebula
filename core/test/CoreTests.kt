@@ -708,6 +708,42 @@ fun main(args: Array<String>) {
         check("vector: the vector file sits next to the png", VectorFile.extensionOf("assets/sub/hero.png") == "assets/sub/hero.nvec")
     }
 
+    // --- vector eraser: rubs out part of a line instead of the whole shape
+    run {
+        val red = 0xFFFF0000.toInt(); val blue = 0xFF0000FF.toInt()
+        fun near(a: Float, b: Float) = Math.abs(a - b) < 0.01f
+        fun line(x0: Float, y0: Float, x1: Float, y1: Float) = VShape(VShape.Kind.Path, floatArrayOf(x0, y0, x1, y1), red, 0, 2f)
+        val one = listOf(line(0f, 0f, 100f, 0f))
+        val mid = VectorErase.along(one, 50f, 0f, 50f, 0f, 5f)             // radius 5 plus half the line width 1: the gap is x 44 to 56
+        check("eraser: the middle of a line is cut out, both sides stay", mid.size == 2 && near(mid[0].pts[2], 44f) && near(mid[1].pts[0], 56f) && mid[0].pts[0] == 0f && mid[1].pts[2] == 100f)
+        check("eraser: the pieces keep the colour and width", mid.all { it.stroke == red && it.width == 2f && it.fill == 0 })
+        check("eraser: out of reach nothing changes, the same list comes back", VectorErase.along(one, 50f, 30f, 50f, 30f, 5f) === one)
+        val end = VectorErase.along(one, 2f, 0f, 2f, 0f, 5f)
+        check("eraser: rubbing out the end leaves one piece", end.size == 1 && near(end[0].pts[0], 8f) && near(end[0].pts[2], 100f))
+        check("eraser: a line that is all under the eraser is gone", VectorErase.along(listOf(line(0f, 0f, 4f, 0f)), 2f, 0f, 2f, 0f, 5f).isEmpty())
+        val drag = VectorErase.along(one, 50f, -20f, 50f, 20f, 5f)           // dragged across the line: both ends of the drag are far away from it
+        check("eraser: a drag across a line cuts it too", drag.size == 2 && near(drag[0].pts[2], 44f) && near(drag[1].pts[0], 56f))
+        val twice = VectorErase.along(mid, 20f, 0f, 20f, 0f, 5f)
+        check("eraser: a second cut makes three pieces and leaves the untouched one alone", twice.size == 3 && twice[2] === mid[1] && near(twice[0].pts[2], 14f) && near(twice[1].pts[0], 26f))
+        check("eraser: a dot goes when touched and stays when not", VectorErase.along(listOf(VShape(VShape.Kind.Path, floatArrayOf(5f, 5f), red, 0, 4f)), 6f, 5f, 6f, 5f, 1f).isEmpty() &&
+            VectorErase.along(listOf(VShape(VShape.Kind.Path, floatArrayOf(5f, 5f), red, 0, 4f)), 50f, 5f, 50f, 5f, 1f).size == 1)
+
+        val fillOnly = VShape(VShape.Kind.Rect, floatArrayOf(10f, 10f, 30f, 30f), 0, blue, 1f)
+        val both = VShape(VShape.Kind.Rect, floatArrayOf(10f, 10f, 30f, 30f), red, blue, 2f)
+        check("eraser: a shape that is only a fill goes whole when touched", VectorErase.along(listOf(fillOnly), 20f, 20f, 20f, 20f, 1f).isEmpty() && VectorErase.along(listOf(fillOnly), 50f, 50f, 50f, 50f, 1f).size == 1)
+        val edge = VectorErase.along(listOf(both), 10f, 20f, 10f, 20f, 2f)
+        check("eraser: at the edge of a shape with a line and a fill only the line is cut", edge.size == 2 && edge[0].stroke == 0 && edge[0].fill == blue && edge[0].kind == VShape.Kind.Rect &&
+            edge[1].stroke == red && edge[1].fill == 0)
+        check("eraser: a closed outline cut once is one piece with a gap", near(edge[1].pts[1], 17f) && near(edge[1].pts[edge[1].pts.size - 1], 23f))
+        check("eraser: well inside a shape with a line and a fill it goes whole", VectorErase.along(listOf(both), 20f, 20f, 20f, 20f, 2f).isEmpty())
+        val outline = VectorErase.along(listOf(VShape(VShape.Kind.Rect, floatArrayOf(10f, 10f, 30f, 30f), red, 0, 2f)), 20f, 20f, 20f, 20f, 2f)
+        check("eraser: the middle of an outline is empty space, nothing is touched", outline.size == 1 && outline[0].kind == VShape.Kind.Rect)
+
+        val d = VectorDoc.blank(64, 64); d.add(line(0f, 0f, 60f, 0f))
+        check("eraser: the frame takes the result in one undo step", d.replaceShapes(VectorErase.along(d.frame, 30f, 0f, 30f, 0f, 3f)) && d.frame.size == 2 && !d.replaceShapes(d.frame))
+        d.undo(); check("eraser: undo brings the whole line back", d.frame.size == 1 && d.frame[0].pts.size == 4)
+    }
+
     // --- DynamicBar script API compiles with snc and the bar scene loads
     run {
         val bp = Project.create(File(tmp, "bars"), "Bars", preset = Preset.BLANK)

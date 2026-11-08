@@ -10,6 +10,10 @@ class VShape(val kind: Kind, val pts: FloatArray, val stroke: Int, val fill: Int
     enum class Kind { Path, Line, Rect, Ellipse }
 
     fun withFill(c: Int) = VShape(kind, pts, stroke, c, width)
+    fun withStroke(c: Int) = VShape(kind, pts, c, fill, width)
+
+    /** The line the shape is drawn along as x,y pairs (a rectangle or ellipse becomes a closed many-sided line). Do not change the array. */
+    fun outline(): FloatArray = poly
 
     /** Shapes that have an inside to paint (a freehand stroke counts as closed when it has three points or more). */
     val closed: Boolean get() = kind == Kind.Rect || kind == Kind.Ellipse || (kind == Kind.Path && pts.size >= 6)
@@ -137,6 +141,15 @@ class VectorDoc(override val width: Int, override val height: Int, frames: List<
         checkpoint(); replaceCurrent(frame.filterIndexed { i, _ -> i !in drop }); return true
     }
 
+    /**
+     * Replaces the shapes of the current frame (one undo step), for example with what [VectorErase.along] left of them.
+     * Returns false, and records nothing, when [shapes] are the very same shapes as now.
+     */
+    fun replaceShapes(shapes: List<VShape>): Boolean {
+        if (shapes.size == frame.size && shapes.indices.all { shapes[it] === frame[it] }) return false
+        checkpoint(); replaceCurrent(shapes); return true
+    }
+
     /** Positions of every shape of the current frame that ([x], [y]) touches (see [VShape.hits]). */
     fun hitAll(x: Float, y: Float, tol: Float): List<Int> = frame.indices.filter { frame[it].hits(x, y, tol) }
 
@@ -177,6 +190,142 @@ class VectorDoc(override val width: Int, override val height: Int, frames: List<
         /** [color] with its alpha scaled by [opacity] (0..1): the way a colour and the opacity slider become one ARGB value. */
         fun tint(color: Int, opacity: Float): Int =
             Argb.make(Math.round(Argb.a(color) * opacity.coerceIn(0f, 1f)), Argb.r(color), Argb.g(color), Argb.b(color))
+    }
+}
+
+/**
+ * The vector eraser: a round brush that rubs out the part of a line it passes over instead of the whole shape. Android-free so it is
+ * tested in CoreTests. The editor calls [along] for every bit of the finger's way and shows the result at once; when the finger lifts,
+ * the last result becomes the frame ([VectorDoc.replaceShapes], one undo step).
+ */
+object VectorErase {
+    /**
+     * [shapes] after an eraser of radius [r] moved from ([x0], [y0]) to ([x1], [y1]). Shapes it did not touch come back as the very same
+     * objects, and when it touched nothing at all the very same list comes back.
+     *
+     * * a line, an outline or a freehand stroke is cut: the part under the eraser goes, what is left on either side stays as strokes of its own
+     * * a shape that is only a fill goes whole when touched (an area cannot be rubbed out in pieces)
+     * * a shape with a line and a fill loses just the part of its line (the fill stays), unless the eraser is well inside the fill: then it goes whole
+     */
+    fun along(shapes: List<VShape>, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): List<VShape> {
+        var changed = false
+        val out = ArrayList<VShape>(shapes.size + 2)
+        for (s in shapes) {
+            val res = shape(s, x0, y0, x1, y1, r)
+            if (res == null) out.add(s) else { changed = true; out.addAll(res) }
+        }
+        return if (changed) out else shapes
+    }
+
+    /** What is left of [s], or null when the eraser did not touch it (an empty list: all of it went). */
+    private fun shape(s: VShape, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): List<VShape>? {
+        val p = s.outline()
+        val reach = r + (if (s.stroke != 0) s.width / 2f else 0f)      // a stroke's round ends reach half its width past where it was cut
+        if (p.size < 2) return null
+        if (p.size == 2) return if (pointNear(p[0], p[1], x0, y0, x1, y1, reach)) emptyList() else null      // a dot
+        val touches = touches(p, x0, y0, x1, y1, reach)
+        if (s.fill != 0) {
+            val inside = s.closed && (s.contains(x0, y0) || s.contains(x1, y1))
+            if (s.stroke == 0) return if (inside || touches) emptyList() else null
+            val deep = (s.closed && s.contains(x0, y0) && s.outlineDistance(x0, y0) > reach) ||
+                (s.closed && s.contains(x1, y1) && s.outlineDistance(x1, y1) > reach)
+            if (deep) return emptyList()
+            if (!touches) return null
+            return listOf(s.withStroke(0)) + cut(s, p, x0, y0, x1, y1, reach)
+        }
+        if (!touches) return null
+        return cut(s, p, x0, y0, x1, y1, reach)
+    }
+
+    private fun pointNear(px: Float, py: Float, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): Boolean =
+        cover(px, py, px, py, x0, y0, x1, y1, r) != null
+
+    private fun touches(p: FloatArray, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): Boolean {
+        var k = 0
+        while (k + 3 < p.size) { if (cover(p[k], p[k + 1], p[k + 2], p[k + 3], x0, y0, x1, y1, r) != null) return true; k += 2 }
+        return false
+    }
+
+    /** The pieces of the line [p] that are left outside the eraser, as strokes of [s]'s colour and width (a closed line cut once stays one piece). */
+    private fun cut(s: VShape, p: FloatArray, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): List<VShape> {
+        val pieces = ArrayList<FloatArray>()
+        var cur = ArrayList<Float>()
+        fun emit() { if (cur.size >= 4) pieces.add(cur.toFloatArray()); cur = ArrayList() }
+        fun put(x: Float, y: Float) { if (cur.size >= 2 && cur[cur.size - 2] == x && cur[cur.size - 1] == y) return; cur.add(x); cur.add(y) }
+        var k = 0
+        while (k + 3 < p.size) {
+            val ax = p[k]; val ay = p[k + 1]; val bx = p[k + 2]; val by = p[k + 3]
+            val iv = cover(ax, ay, bx, by, x0, y0, x1, y1, r)
+            if (iv == null) { put(ax, ay); put(bx, by) }
+            else {
+                val lo = iv[0]; val hi = iv[1]
+                if (lo > EPS) { put(ax, ay); put(ax + (bx - ax) * lo, ay + (by - ay) * lo) }
+                emit()
+                if (hi < 1f - EPS) { put(ax + (bx - ax) * hi, ay + (by - ay) * hi); put(bx, by) }
+            }
+            k += 2
+        }
+        emit()
+        // a closed line that was cut once starts and ends at the same corner: join its two ends into one stroke
+        val n = p.size
+        if (pieces.size >= 2 && p[0] == p[n - 2] && p[1] == p[n - 1]) {
+            val first = pieces.first(); val last = pieces.last()
+            if (first[0] == p[0] && first[1] == p[1] && last[last.size - 2] == p[0] && last[last.size - 1] == p[1]) {
+                pieces[0] = last + first.copyOfRange(2, first.size)
+                pieces.removeAt(pieces.size - 1)
+            }
+        }
+        return pieces.map { VShape(VShape.Kind.Path, it, s.stroke, 0, s.width) }
+    }
+
+    private const val EPS = 1e-3f
+
+    /**
+     * The part of the segment A to B (as t from 0 to 1) that lies within [r] of the eraser's way, the segment from (x0, y0) to (x1, y1),
+     * or null when none does. The eraser's way with its round brush is convex, so what is inside on a straight line is one stretch.
+     */
+    private fun cover(ax: Float, ay: Float, bx: Float, by: Float, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): FloatArray? {
+        var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
+        fun add(t: FloatArray?) { if (t != null) { lo = minOf(lo, t[0]); hi = maxOf(hi, t[1]) } }
+        add(disc(ax, ay, bx, by, x0, y0, r))
+        if (x1 != x0 || y1 != y0) { add(disc(ax, ay, bx, by, x1, y1, r)); add(strip(ax, ay, bx, by, x0, y0, x1, y1, r)) }
+        return if (lo <= hi) floatArrayOf(lo, hi) else null
+    }
+
+    /** Where the segment A to B is inside the circle of radius [r] around ([cx], [cy]). */
+    private fun disc(ax: Float, ay: Float, bx: Float, by: Float, cx: Float, cy: Float, r: Float): FloatArray? {
+        val dx = bx - ax; val dy = by - ay; val fx = ax - cx; val fy = ay - cy
+        val a = dx * dx + dy * dy; val c = fx * fx + fy * fy - r * r
+        if (a < 1e-12f) return if (c <= 0f) floatArrayOf(0f, 1f) else null
+        val b = 2f * (fx * dx + fy * dy)
+        val d = b * b - 4f * a * c
+        if (d < 0f) return null
+        val q = Math.sqrt(d.toDouble()).toFloat()
+        val lo = maxOf((-b - q) / (2f * a), 0f); val hi = minOf((-b + q) / (2f * a), 1f)
+        return if (lo <= hi) floatArrayOf(lo, hi) else null
+    }
+
+    /** Where the segment A to B is inside the rectangle that is the eraser's way (the segment from (x0, y0) to (x1, y1)) made [r] wide on both sides. */
+    private fun strip(ax: Float, ay: Float, bx: Float, by: Float, x0: Float, y0: Float, x1: Float, y1: Float, r: Float): FloatArray? {
+        val ex = x1 - x0; val ey = y1 - y0
+        val len = Math.sqrt((ex * ex + ey * ey).toDouble()).toFloat()
+        if (len < 1e-6f) return null
+        val ux = ex / len; val uy = ey / len           // along the eraser's way
+        val nx = -uy; val ny = ux                      // across it
+        val dx = bx - ax; val dy = by - ay
+        val t = floatArrayOf(0f, 1f)
+        if (!band((ax - x0) * ux + (ay - y0) * uy, dx * ux + dy * uy, 0f, len, t)) return null
+        if (!band((ax - x0) * nx + (ay - y0) * ny, dx * nx + dy * ny, -r, r, t)) return null
+        return t
+    }
+
+    /** Narrows [t] (a start and an end) to where lo <= c0 + t * dc <= hi. False when nothing is left. */
+    private fun band(c0: Float, dc: Float, lo: Float, hi: Float, t: FloatArray): Boolean {
+        if (Math.abs(dc) < 1e-9f) return c0 >= lo && c0 <= hi
+        var t0 = (lo - c0) / dc; var t1 = (hi - c0) / dc
+        if (t0 > t1) { val x = t0; t0 = t1; t1 = x }
+        t[0] = maxOf(t[0], t0); t[1] = minOf(t[1], t1)
+        return t[0] <= t[1]
     }
 }
 

@@ -32,7 +32,8 @@ import nebula.core.Preset
 @Composable
 fun ModalHost(studio: Studio) {
     val m = studio.modal ?: return
-    Box(Modifier.fillMaxSize().background(Color(0xAA000000)).clickable { if (m is Modal.Sprite) studio.closeSprite() else studio.modal = null }, contentAlignment = Alignment.TopCenter) {
+    Box(Modifier.fillMaxSize().background(Color(0xAA000000)).clickable { if (m is Modal.Sprite) studio.closeSprite() else studio.modal = null }
+        .windowInsetsPadding(WindowInsets.navigationBars), contentAlignment = Alignment.TopCenter) {
         val wide = m is Modal.Animation || m is Modal.Sprite
         Column(Modifier.padding(top = if (wide) 24.dp else 56.dp, start = 16.dp, end = 16.dp).widthIn(max = if (wide) 860.dp else 560.dp).fillMaxWidth().heightIn(max = if (wide) 720.dp else 640.dp)
             .clip(RoundedCornerShape(16.dp)).background(C.panel).clickable(enabled = false) {}.padding(16.dp)) {
